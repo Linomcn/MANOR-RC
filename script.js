@@ -454,6 +454,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const tabContents = document.querySelectorAll('.game-tab-content');
 
   // GESTION CENTRALE DES ONGLETS
+  // GESTION CENTRALE DES ONGLETS
   function showTab(tabId) {
     tabButtons.forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === tabId));
     tabContents.forEach(c => { c.style.display = c.id === tabId ? 'block' : 'none'; });
@@ -465,8 +466,8 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tabId === 'tab-exchange') {
         loadExchangePlayers();
         initTradeRealtime();
-        // Force le chargement des cartes en cache si ce n'est pas déjà fait
-        if (cachedAllCards.length === 0) loadUserCollection(currentUser.id);
+        // FORCE le chargement pour éviter le bug des cartes fantômes
+        loadUserCollection(currentUser.id); 
       }
     }
   }
@@ -957,32 +958,42 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  function openCardPicker() {
+  // 9. Modale de sélection de carte
+  async function openCardPicker() {
     if (!pickerCollectionGrid || !cardPickerModal) return;
+
+    // Affiche un écran de chargement pour rassurer le joueur
+    pickerCollectionGrid.innerHTML = '<p class="grid-message">Chargement de ton classeur...</p>';
+    cardPickerModal.style.display = 'flex';
+
+    // FORCE la récupération des dernières cartes packées
+    await loadUserCollection(currentUser.id);
+
     pickerCollectionGrid.innerHTML = '';
     const ownedCards = cachedUserCards.filter(uc => uc.quantity > 0);
 
     if (ownedCards.length === 0) {
-      pickerCollectionGrid.innerHTML = '<p class="grid-message">Tu n\'as aucune carte disponible.</p>';
-      cardPickerModal.style.display = 'flex';
+      pickerCollectionGrid.innerHTML = '<p class="grid-message">Tu n\'as aucune carte disponible à échanger.</p>';
       return;
     }
 
     ownedCards.forEach(uc => {
-      const cardDef = cachedAllCards.find(c => c.id === uc.card_id);
+      // On sécurise la recherche en convertissant les ID en texte
+      const cardDef = cachedAllCards.find(c => String(c.id) === String(uc.card_id));
       if (!cardDef) return;
+      
       const el = createCardElement(cardDef, { qty: uc.quantity });
       el.addEventListener('click', async () => {
         selectedTradeCardId = cardDef.id;
         cardPickerModal.style.display = 'none';
+        
         const isSender = currentTrade.sender_id === currentUser.id;
         const updateData = isSender ? { sender_card_id: selectedTradeCardId } : { receiver_card_id: selectedTradeCardId };
+        
         await supabaseClient.from('trades').update(updateData).eq('id', currentTrade.id);
       });
       pickerCollectionGrid.appendChild(el);
     });
-
-    cardPickerModal.style.display = 'flex';
   }
 
   if (closePickerModal) closePickerModal.addEventListener('click', () => cardPickerModal.style.display = 'none');
