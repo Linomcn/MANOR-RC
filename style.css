@@ -396,3 +396,218 @@ body.game-logged-in .game-page-title { display: none; }
 @media (max-width: 900px) {
   .exchange-arena { flex-direction: column; padding: 2rem 1rem; }
 }
+
+/* ===================================================================
+   AMÉLIORATION DE LA MODALE DE SÉLECTION DE CARTES (#cardPickerModal)
+   =================================================================== */
+
+#cardPickerModal .modal-content {
+  max-width: 950px;
+  width: 92%;
+  padding: 2rem 1.5rem;
+  background: #121216;
+  color: #FFFFFF;
+  border: 1px solid rgba(106, 13, 173, 0.4);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.8);
+  border-radius: 16px;
+}
+
+#cardPickerModal h2 {
+  color: var(--color-white);
+  letter-spacing: 1px;
+}
+
+/* Grille de sélection lisible et bien espacée */
+#picker-collection-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 1.2rem;
+  max-height: 65vh;
+  overflow-y: auto;
+  padding: 1rem 0.5rem;
+}
+
+/* Personnalisation de la barre de défilement */
+#picker-collection-grid::-webkit-scrollbar {
+  width: 8px;
+}
+#picker-collection-grid::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 10px;
+}
+#picker-collection-grid::-webkit-scrollbar-thumb {
+  background: var(--color-purple);
+  border-radius: 10px;
+}
+
+/* Cartes sélectionnables dans la modale */
+#picker-collection-grid .tcg-card {
+  cursor: pointer;
+  background: #1A1A22;
+  border-width: 3px;
+  padding: 1rem 0.8rem;
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+#picker-collection-grid .tcg-card:hover {
+  transform: translateY(-6px) scale(1.03);
+  box-shadow: 0 10px 25px rgba(106, 13, 173, 0.5);
+  border-color: #A855F7;
+}
+
+#picker-collection-grid .tcg-card h4 {
+  color: var(--color-white);
+  font-size: 1.1rem;
+}
+
+
+/* ===================================================================
+   RESPONSIVE MOBILE & ERGONOMIE GLOBALE
+   =================================================================== */
+
+/* --- Écrans intermédiaires (Tablettes & grands téléphones : <= 900px) --- */
+@media (max-width: 900px) {
+  /* Navigation par onglets défilable horizontalement */
+  .game-tabs {
+    flex-direction: row;
+    overflow-x: auto;
+    padding-bottom: 0.5rem;
+    gap: 0.6rem;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .game-tab-btn {
+    white-space: nowrap;
+    padding: 0.6rem 1rem;
+    font-size: 1.1rem;
+    border-radius: 20px;
+  }
+
+  /* Arène d'échange compacte */
+  .exchange-arena {
+    flex-direction: column;
+    gap: 1.2rem;
+    padding: 1.5rem 1rem;
+  }
+
+  .trade-side {
+    width: 100%;
+    max-width: 280px;
+  }
+
+  .trade-slot {
+    width: 100%;
+    height: 250px;
+    margin-bottom: 1rem;
+  }
+
+  .trade-vs {
+    width: 48px;
+    height: 48px;
+    margin: -0.5rem 0;
+  }
+}
+
+
+/* --- Smartphones (<= 600px) --- */
+@media (max-width: 600px) {
+  /* Ajustements généraux */
+  .game-section {
+    padding-top: calc(85px + 1rem);
+  }
+
+  .game-container {
+    padding: 0 0.8rem;
+  }
+
+  .game-main-content {
+    padding: 1rem 0.8rem;
+  }
+
+  /* Header du joueur compact */
+  .user-header {
+    padding: 1rem;
+    flex-direction: column;
+    text-align: center;
+    gap: 0.8rem;
+  }
+
+  .user-info {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  .user-avatar {
+    width: 52px;
+    height: 52px;
+    font-size: 1.8rem;
+  }
+
+  .user-header .btn-secondary {
+    width: 100%;
+  }
+
+  /* Affichage de la collection en 2 COLONNES sur smartphone (très lisible) */
+  .collection-grid,
+  #picker-collection-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 0.8rem !important;
+  }
+
+  .tcg-card {
+    padding: 0.8rem 0.5rem;
+    border-width: 3px;
+  }
+
+  .tcg-card-img {
+    height: 110px;
+    margin-bottom: 0.6rem;
+  }
+
+  .tcg-card h4 {
+    font-size: 0.95rem;
+  }
+
+  .tcg-card .rarity-badge {
+    font-size: 0.6rem;
+  }
+
+  .tcg-card .card-qty {
+    width: 20px;
+    height: 20px;
+    font-size: 0.65rem;
+    top: 6px;
+    right: 6px;
+  }
+
+  /* Filtres de la collection sur smartphone */
+  .collection-filters {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .filter-chip {
+    flex: 1;
+    justify-content: center;
+    font-size: 0.75rem;
+    padding: 0.5rem 0.8rem;
+  }
+
+  /* Salle d'échange mobile */
+  .exchange-header h3 {
+    font-size: 1.8rem;
+  }
+
+  .trade-side-header {
+    padding: 0.4rem 0.8rem;
+  }
+
+  .trade-slot {
+    height: 220px;
+  }
+
+  /* Modale d'invitation et d'action */
+  .modal-content {
+    padding: 1.8rem 1.2rem;
+  }
+}
