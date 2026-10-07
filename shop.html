@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Boutique — Manor RC</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%236A0DAD'/><text y='55%' x='50%' dominant-baseline='middle' text-anchor='middle' font-size='35' fill='white' font-family='Arial' font-weight='bold'>MRC</text></svg>" />
+  <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Montserrat:wght@300;400;600;800&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="shop.css" />
+</head>
+<body class="shop-page">
+
+  <!-- Navigation simplifiée -->
+  <nav id="navbar">
+    <div class="nav-container">
+      <a href="index.html" class="nav-logo">
+        <img src="asset/logo.png" alt="Logo du club" class="nav-logo-img" />
+        <span class="logo-text">MANOR <span>RC</span></span>
+      </a>
+      <ul class="nav-menu">
+        <li><a href="index.html">Retour au site</a></li>
+        <li><a href="#panier" class="nav-highlight">Panier (<span id="cart-count">0</span>)</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main>
+    <!-- Produits -->
+    <section class="section shop-section">
+      <div class="container">
+        <h1 class="section-title" style="color: white;">Boutique Officielle</h1>
+        <div class="product-grid" id="product-grid"></div>
+      </div>
+    </section>
+
+    <!-- Panier -->
+    <section id="panier" class="section">
+      <div class="container cart-container">
+        <h2 class="section-title">Ton panier</h2>
+        <p id="cart-empty" class="cart-empty">Ton panier est vide.</p>
+        <ul id="cart-list" class="cart-list"></ul>
+        <div class="cart-footer">
+          <span class="cart-total">Total : <strong id="cart-total">0,00 €</strong></span>
+          <button id="btn-checkout" class="btn-primary" disabled>Passer commande</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-bottom" style="margin-top: 0; border-top: none;">
+      <p>&copy; 2026 Manor RC. Tous droits réservés.</p>
+    </div>
+  </footer>
+
+  <!-- Fenêtre de paiement -->
+  <div id="checkoutModal" class="modal">
+    <div class="modal-content checkout-content">
+      <span class="close-modal" id="close-checkout">&times;</span>
+      <h2 class="checkout-title">Paiement</h2>
+      <form id="checkout-form" autocomplete="off">
+        <div class="form-row">
+          <input type="text" placeholder="Prénom" required />
+          <input type="text" placeholder="Nom" required />
+        </div>
+        <input type="text" placeholder="Adresse de livraison" required />
+        <div class="form-row">
+          <input type="text" placeholder="Code postal" required />
+          <input type="text" placeholder="Ville" required />
+        </div>
+        <input type="text" placeholder="Numéro de carte" inputmode="numeric" required />
+        <div class="form-row">
+          <input type="text" placeholder="MM/AA" required />
+          <input type="text" placeholder="CVV" inputmode="numeric" required />
+        </div>
+        <button type="submit" class="btn-primary btn-pay">Payer</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Écran de la blague -->
+  <div id="prankScreen" class="prank-screen">
+    <div id="prankLoader" class="prank-loader">
+      <div class="spinner"></div>
+      <p>Paiement en cours, ne ferme pas la page...</p>
+    </div>
+    <div id="prankReveal" class="prank-reveal" hidden>
+      <h2 id="prankTitle"></h2>
+      <p id="prankText"></p>
+      <p class="prank-safe">Rassure-toi : rien n'a été envoyé, enregistré ou installé. C'était une blague.</p>
+      <button id="prankClose" class="btn-primary">Retour à la boutique</button>
+    </div>
+  </div>
+
+  <script src="shop.js"></script>
+</body>
+</html>
