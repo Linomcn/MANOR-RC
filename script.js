@@ -453,8 +453,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const tabButtons = document.querySelectorAll('.game-tab-btn');
   const tabContents = document.querySelectorAll('.game-tab-content');
 
-  // GESTION CENTRALE DES ONGLETS
-  // GESTION CENTRALE DES ONGLETS
   function showTab(tabId) {
     tabButtons.forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === tabId));
     tabContents.forEach(c => { c.style.display = c.id === tabId ? 'block' : 'none'; });
@@ -466,7 +464,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (tabId === 'tab-exchange') {
         loadExchangePlayers();
         initTradeRealtime();
-        // FORCE le chargement pour éviter le bug des cartes fantômes
         loadUserCollection(currentUser.id); 
       }
     }
@@ -504,7 +501,7 @@ document.addEventListener('DOMContentLoaded', () => {
   function refreshPackUI() {
     if (!btnOpenPack || !packTimerText) return;
     if (packTimerInterval) clearInterval(packTimerInterval);
-    if (btnForceGold) btnForceGold.style.display = isAdmin ? '' : 'none';
+    if (btnForceGold) btnForceGold.style.display = isAdmin ? 'block' : 'none';
 
     if (isAdmin) {
       packTimerText.textContent = '⚡ Mode Admin : packs illimités !';
@@ -643,50 +640,100 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // Animation Pack
-  const overlay = document.getElementById('fullscreen-reveal');
-  const boosterContainer = document.getElementById('booster-pack-container');
-  const cardsContainer = document.getElementById('revealed-cards-container');
-
+  // ===================================================================
+  // ANIMATION DU PACK (RECONSTRUITE APRÈS LA PERTE DU COMMIT)
+  // ===================================================================
   function closeOverlayNow() {
+    const overlay = document.getElementById('fullscreen-reveal');
     if (overlay) overlay.classList.add('hidden');
     document.body.style.overflow = '';
   }
 
   function playPackAnimation(cards) {
     return new Promise((resolve) => {
+      const overlay = document.getElementById('fullscreen-reveal');
+      const boosterContainer = document.getElementById('booster-pack-container');
+      const cardsContainer = document.getElementById('revealed-cards-container');
+      const godRays = document.getElementById('god-rays');
+      const goldSparkles = document.getElementById('gold-sparkles');
+      const textCloseReveal = document.getElementById('text-close-reveal');
+      const boosterHint = document.querySelector('.booster-hint');
+
       if (!overlay || !boosterContainer) { resolve(); return; }
 
+      // Détection de la meilleure carte
+      const maxWeightInPack = Math.max(...cards.map(c => rarityLevel(c)));
+      const hasEpicCard = maxWeightInPack >= 3;
+
+      // Réinitialisation de l'UI
       boosterContainer.className = 'booster-wrapper';
       cardsContainer.innerHTML = '';
       cardsContainer.classList.add('hidden');
+      if (textCloseReveal) textCloseReveal.classList.add('hidden');
+      if (godRays) godRays.classList.add('hidden');
+      if (goldSparkles) goldSparkles.classList.add('hidden');
+      if (boosterHint) boosterHint.style.opacity = '1';
+
       document.body.style.overflow = 'hidden';
       overlay.classList.remove('hidden');
       boosterContainer.focus();
 
-      const finish = () => { closeOverlayNow(); resolve(); };
+      let isClosing = false;
+      const finish = () => {
+        if (isClosing) return;
+        isClosing = true;
+        closeOverlayNow();
+        overlay.removeEventListener('click', finish);
+        resolve();
+      };
       
-      async function openBooster() {
-        boosterContainer.classList.add('opening-shake');
-        await wait(600);
-        boosterContainer.classList.remove('opening-shake');
+      async function openBooster(e) {
+        e.stopPropagation();
+        boosterContainer.removeEventListener('click', openBooster);
+        if (boosterHint) boosterHint.style.opacity = '0';
+
+        // 1. ANTICIPATION
+        if (hasEpicCard) {
+          if (goldSparkles) goldSparkles.classList.remove('hidden');
+          boosterContainer.classList.add('gold-anticipation');
+          await wait(2500);
+        } else {
+          boosterContainer.classList.add('opening-shake');
+          await wait(600);
+        }
+
+        // 2. DÉCHIRURE
+        boosterContainer.classList.remove('opening-shake', 'gold-anticipation');
         boosterContainer.classList.add('is-tearing');
+        if (hasEpicCard && godRays) godRays.classList.remove('hidden');
+
         await wait(500);
         boosterContainer.classList.add('hidden');
 
+        // 3. APPARITION DES CARTES
         cards.forEach((card, index) => {
           const el = createCardElement(card);
           el.classList.add('card-reveal-anim');
+          // Marqueur pour déclencher l'aura lumineuse plus tard
+          if (rarityLevel(card) >= 3) el.classList.add('epic-card-ready');
           el.style.animationDelay = (index * 0.4) + 's';
           cardsContainer.appendChild(el);
         });
+
         cardsContainer.classList.remove('hidden');
 
-        setTimeout(finish, cards.length * 400 + 2000); // Ferme auto après visionnage
+        // 4. RÉVÉLATION FINALE & AUTORISATION DE FERMETURE
+        const totalRevealTime = (cards.length * 400) + 1000;
+        setTimeout(() => {
+          cardsContainer.querySelectorAll('.epic-card-ready').forEach(el => {
+            el.classList.add('gold-epic-reveal');
+          });
+          if (textCloseReveal) textCloseReveal.classList.remove('hidden');
+          overlay.addEventListener('click', finish);
+        }, totalRevealTime);
       }
 
-      boosterContainer.addEventListener('click', openBooster, { once: true });
-      overlay.addEventListener('click', finish);
+      boosterContainer.addEventListener('click', openBooster);
     });
   }
 
@@ -751,7 +798,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ===================================================================
-  //  PARTIE 7 — SYSTÈME D'ÉCHANGES (TEMPS RÉEL & ANTI-TRICHE)
+  //  PARTIE 7 — SYSTÈME D'ÉCHANGES
   // ===================================================================
   let currentTrade = null;
   let tradeRealtimeChannel = null;
@@ -910,7 +957,6 @@ document.addEventListener('DOMContentLoaded', () => {
         myTradeSlot.classList.add('has-card');
         const cardEl = createCardElement(cardDef);
         
-        // Permet de cliquer sur la carte pour la changer (si non validée)
         if (!myLocked) {
           cardEl.style.cursor = 'pointer';
           cardEl.title = "Clique pour changer de carte";
@@ -944,7 +990,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (opponentLockStatus) opponentLockStatus.textContent = oppLocked ? '🔒 Adversaire prêt !' : 'En train de choisir...';
     if (opponentLockShield) opponentLockShield.style.display = oppLocked ? 'block' : 'none';
 
-    // Seul l'expéditeur initialise la requête SQL pour éviter les conflits
     if (myLocked && oppLocked && isSender) {
       executeTradeTransaction(trade.id);
     }
@@ -958,15 +1003,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // 9. Modale de sélection de carte
   async function openCardPicker() {
     if (!pickerCollectionGrid || !cardPickerModal) return;
 
-    // Affiche un écran de chargement pour rassurer le joueur
     pickerCollectionGrid.innerHTML = '<p class="grid-message">Chargement de ton classeur...</p>';
     cardPickerModal.style.display = 'flex';
 
-    // FORCE la récupération des dernières cartes packées
     await loadUserCollection(currentUser.id);
 
     pickerCollectionGrid.innerHTML = '';
@@ -978,7 +1020,6 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     ownedCards.forEach(uc => {
-      // On sécurise la recherche en convertissant les ID en texte
       const cardDef = cachedAllCards.find(c => String(c.id) === String(uc.card_id));
       if (!cardDef) return;
       
