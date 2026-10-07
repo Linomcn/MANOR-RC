@@ -1,17 +1,13 @@
 // =====================================================================
 //  MANOR RC — script.js
 //  Sert aux DEUX pages : index.html (site vitrine) et jeu.html (jeu).
-//  Chaque partie vérifie que ses éléments existent avant de s'activer.
 // =====================================================================
 
 const SUPABASE_URL = 'https://weolphofgqltwazxeshm.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_BrJ9UhFgxWemyWrAEW4CYQ_54YeCIr4';
 
-// ---------------------------------------------------------------------
-//  RÉGLAGES DU JEU : change ces valeurs pour équilibrer les packs
-// ---------------------------------------------------------------------
-const PACK_COOLDOWN_MS = 5 * 60 * 1000;   // temps entre deux packs gratuits
-const CARDS_PER_PACK = 3;                 // cartes par pack
+const PACK_COOLDOWN_MS = 5 * 60 * 1000;
+const CARDS_PER_PACK = 3;
 const PACK_ODDS = { bronze: 70, argent: 25, or: 5 };
 const RARITY_ORDER = { bronze: 1, argent: 2, or: 3 };
 
@@ -119,7 +115,7 @@ function createCardElement(card, options = {}) {
 const wait = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // =====================================================================
-//  DÉMARRAGE DE L'ÉCOUTEUR PRINCIPAL
+//  DÉMARRAGE PRINCIPAL (LE BLOC QUI ENGLOBE TOUT)
 // =====================================================================
 document.addEventListener('DOMContentLoaded', () => {
 
@@ -288,7 +284,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ===================================================================
-  //  PARTIE 2 — COMPTE UTILISATEUR (jeu.html)
+  //  PARTIE 2 — COMPTE UTILISATEUR
   // ===================================================================
   const authContainer = document.getElementById('auth-container');
   const gameDashboard = document.getElementById('game-dashboard');
@@ -322,14 +318,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function translateError(error) {
     const msg = ((error && error.message) || '').toLowerCase();
-    const code = (error && error.code) || '';
-    if (code === 'invalid_credentials' || msg.includes('invalid login credentials')) return 'Email ou mot de passe incorrect.';
-    if (code === 'email_not_confirmed' || msg.includes('email not confirmed')) return "Ton email n'est pas encore confirmé : clique sur le lien reçu par mail.";
-    if (code === 'user_already_exists' || msg.includes('already registered')) return 'Un compte existe déjà avec cet email. Essaie de te connecter.';
-    if (code === 'weak_password' || msg.includes('password should be at least')) return 'Le mot de passe doit faire au moins 6 caractères.';
-    if (code === 'over_email_send_rate_limit' || msg.includes('rate limit') || msg.includes('too many')) return 'Trop de tentatives. Patiente un peu avant de réessayer.';
-    if (msg.includes('failed to fetch') || msg.includes('network')) return 'Connexion impossible. Vérifie ta connexion internet.';
-    if (msg.includes('invalid email') || msg.includes('unable to validate email')) return "L'adresse email n'est pas valide.";
+    if (msg.includes('invalid login credentials')) return 'Email ou mot de passe incorrect.';
+    if (msg.includes('email not confirmed')) return "Ton email n'est pas confirmé : clique sur le lien reçu.";
+    if (msg.includes('already registered')) return 'Un compte existe déjà avec cet email.';
+    if (msg.includes('password should be at least')) return 'Le mot de passe doit faire au moins 6 caractères.';
+    if (msg.includes('rate limit')) return 'Trop de tentatives. Patiente un peu.';
     return (error && error.message) || 'Une erreur est survenue. Réessaie.';
   }
 
@@ -350,11 +343,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (tabLogin && tabSignup) {
       tabLogin.classList.toggle('active', login);
       tabSignup.classList.toggle('active', !login);
-      tabLogin.setAttribute('aria-selected', String(login));
-      tabSignup.setAttribute('aria-selected', String(!login));
     }
     if (authTitle) authTitle.textContent = login ? 'Connexion au Club' : 'Rejoindre le Club';
-    if (authSubtitle) authSubtitle.textContent = login ? 'Retrouve ton profil et tes packs.' : 'Crée ton compte pour collectionner les cartes du club.';
+    if (authSubtitle) authSubtitle.textContent = login ? 'Retrouve ton profil et tes packs.' : 'Crée ton compte pour collectionner.';
     if (groupUsername) groupUsername.style.display = login ? 'none' : 'block';
     if (inputUsername) inputUsername.required = !login;
     if (inputPassword) {
@@ -379,11 +370,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function createProfile(userId, username) {
     if (!supabaseClient) return false;
     const { error } = await supabaseClient.from('profiles').insert([{ id: userId, username: username, is_admin: false }]);
-    if (error && error.code !== '23505') {
-      console.error('Profil non créé dans la table profiles :', error);
-      return false;
-    }
-    return true;
+    return !error || error.code === '23505';
   }
 
   async function handleLogin(email, password) {
@@ -395,16 +382,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function handleSignup(email, password, username) {
     if (username.length < 3) throw new Error('Le pseudo doit faire au moins 3 caractères.');
-
-    const { data, error } = await supabaseClient.auth.signUp({
-      email, password, options: { data: { username } }
-    });
+    const { data, error } = await supabaseClient.auth.signUp({ email, password, options: { data: { username } } });
     if (error) throw error;
 
     if (data.user && data.user.identities && data.user.identities.length === 0) {
-      const err = new Error('User already registered');
-      err.code = 'user_already_exists';
-      throw err;
+      throw new Error('User already registered');
     }
 
     if (data.session) {
@@ -415,8 +397,7 @@ document.addEventListener('DOMContentLoaded', () => {
       authForm.reset();
       setMode(true);
       inputEmail.value = email;
-      showFormMessage("Compte créé ! Un email de confirmation vient d'être envoyé : clique sur le lien dedans, puis connecte-toi.", 'success');
-      showToast('Compte créé ! Vérifie ta boîte mail.', 'success');
+      showFormMessage("Compte créé ! Un email de confirmation vient d'être envoyé.", 'success');
     }
   }
 
@@ -424,27 +405,14 @@ document.addEventListener('DOMContentLoaded', () => {
     authForm.addEventListener('submit', async (e) => {
       e.preventDefault();
       clearFormMessage();
-
-      if (!supabaseClient) {
-        const msg = "Le système de connexion n'a pas pu se charger. Recharge la page.";
-        showFormMessage(msg, 'error');
-        showToast(msg, 'error');
-        return;
-      }
-
-      const email = inputEmail.value.trim();
-      const password = inputPassword.value;
-      const username = inputUsername.value.trim();
+      if (!supabaseClient) return;
 
       setLoading(true);
       try {
-        if (isLoginMode) await handleLogin(email, password);
-        else await handleSignup(email, password, username);
+        if (isLoginMode) await handleLogin(inputEmail.value.trim(), inputPassword.value);
+        else await handleSignup(inputEmail.value.trim(), inputPassword.value, inputUsername.value.trim());
       } catch (err) {
-        console.error('Erreur de compte :', err);
-        const msg = translateError(err);
-        showFormMessage(msg, 'error');
-        showToast(msg, 'error');
+        showFormMessage(translateError(err), 'error');
       } finally {
         setLoading(false);
       }
@@ -452,7 +420,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ===================================================================
-  //  PARTIE 3 — ESPACE JEU
+  //  PARTIE 3 & 4 — ESPACE JEU ET COLLECTION
   // ===================================================================
   const displayUsername = document.getElementById('display-username');
   const displayEmail = document.getElementById('display-email');
@@ -471,6 +439,11 @@ document.addEventListener('DOMContentLoaded', () => {
   let packTimerInterval = null;
   let isOpeningPack = false;
 
+  let cachedAllCards = [];
+  let cachedUserCards = [];
+  let currentRaritySort = 'asc';
+  let currentOwnershipFilter = 'all';
+
   function renderUserHeader(name, email) {
     if (displayUsername) displayUsername.textContent = name;
     if (displayEmail) displayEmail.textContent = email || '';
@@ -480,12 +453,24 @@ document.addEventListener('DOMContentLoaded', () => {
   const tabButtons = document.querySelectorAll('.game-tab-btn');
   const tabContents = document.querySelectorAll('.game-tab-content');
 
-  let showTab = function(tabId) {
+  // GESTION CENTRALE DES ONGLETS
+  function showTab(tabId) {
     tabButtons.forEach(b => b.classList.toggle('active', b.getAttribute('data-tab') === tabId));
     tabContents.forEach(c => { c.style.display = c.id === tabId ? 'block' : 'none'; });
-    if (tabId === 'tab-collection' && currentUser) loadUserCollection(currentUser.id);
+    
+    if (currentUser) {
+      if (tabId === 'tab-collection') {
+        loadUserCollection(currentUser.id);
+      }
+      if (tabId === 'tab-exchange') {
+        loadExchangePlayers();
+        initTradeRealtime();
+        // Force le chargement des cartes en cache si ce n'est pas déjà fait
+        if (cachedAllCards.length === 0) loadUserCollection(currentUser.id);
+      }
+    }
   }
-  
+
   tabButtons.forEach(btn => {
     btn.addEventListener('click', () => showTab(btn.getAttribute('data-tab')));
   });
@@ -494,39 +479,23 @@ document.addEventListener('DOMContentLoaded', () => {
     const metaName = (user.user_metadata && user.user_metadata.username) || '';
     renderUserHeader(metaName || (user.email ? user.email.split('@')[0] : 'Joueur'), user.email);
 
-    const { data, error } = await supabaseClient
-      .from('profiles')
-      .select('username, last_pack_opened_at, is_admin')
-      .eq('id', user.id)
-      .maybeSingle();
-
+    const { data, error } = await supabaseClient.from('profiles').select('*').eq('id', user.id).maybeSingle();
     if (!currentUser || currentUser.id !== user.id) return;
 
     let profile = data;
-    if (error) {
-      console.error('Lecture du profil impossible :', error);
-      if (packTimerText) packTimerText.textContent = 'Impossible de charger ton profil. Recharge la page.';
-      showToast('Impossible de charger ton profil.', 'error');
-      return;
-    }
     if (!profile) {
       const username = metaName || (user.email ? user.email.split('@')[0] : 'Joueur');
       await createProfile(user.id, username);
       profile = { username, last_pack_opened_at: null, is_admin: false };
     }
 
-    if (profile.username) renderUserHeader(profile.username, user.email);
+    renderUserHeader(profile.username, user.email);
     isAdmin = !!profile.is_admin;
     nextPackAt = profile.last_pack_opened_at ? new Date(profile.last_pack_opened_at).getTime() + PACK_COOLDOWN_MS : 0;
 
     if (roleBadge) {
-      if (isAdmin) {
-        roleBadge.textContent = '⚡ ADMIN MANOR RC (Packs Illimités)';
-        roleBadge.style.color = '#FFD700';
-      } else {
-        roleBadge.textContent = defaultRoleText;
-        roleBadge.style.color = '';
-      }
+      roleBadge.textContent = isAdmin ? '⚡ ADMIN MANOR RC' : defaultRoleText;
+      roleBadge.style.color = isAdmin ? '#FFD700' : '';
     }
     refreshPackUI();
   }
@@ -534,11 +503,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function refreshPackUI() {
     if (!btnOpenPack || !packTimerText) return;
     if (packTimerInterval) clearInterval(packTimerInterval);
-
     if (btnForceGold) btnForceGold.style.display = isAdmin ? '' : 'none';
 
     if (isAdmin) {
-      packTimerText.textContent = '⚡ Mode Admin : packs illimités et instantanés !';
+      packTimerText.textContent = '⚡ Mode Admin : packs illimités !';
       btnOpenPack.disabled = isOpeningPack;
       if (btnForceGold) btnForceGold.disabled = isOpeningPack;
       return;
@@ -551,30 +519,14 @@ document.addEventListener('DOMContentLoaded', () => {
         btnOpenPack.disabled = isOpeningPack;
         clearInterval(packTimerInterval);
       } else {
-        const minutes = Math.floor(remaining / 60000);
-        const seconds = Math.floor((remaining % 60000) / 1000);
-        packTimerText.textContent = `Prochain pack dans : ${minutes}m ${seconds < 10 ? '0' : ''}${seconds}s`;
+        const min = Math.floor(remaining / 60000);
+        const sec = Math.floor((remaining % 60000) / 1000);
+        packTimerText.textContent = `Prochain pack dans : ${min}m ${sec < 10 ? '0' : ''}${sec}s`;
         btnOpenPack.disabled = true;
       }
     };
     tick();
     packTimerInterval = setInterval(tick, 1000);
-  }
-
-  async function saveCardToCollection(userId, card) {
-    const { data: existing, error: readError } = await supabaseClient
-      .from('user_cards').select('id, quantity')
-      .eq('user_id', userId).eq('card_id', card.id).maybeSingle();
-    if (readError) return readError;
-
-    if (existing) {
-      const { error } = await supabaseClient.from('user_cards')
-        .update({ quantity: existing.quantity + 1 }).eq('id', existing.id);
-      return error;
-    }
-    const { error } = await supabaseClient.from('user_cards')
-      .insert([{ user_id: userId, card_id: card.id, quantity: 1 }]);
-    return error;
   }
 
   async function openPack(forceGold) {
@@ -587,39 +539,29 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnForceGold) btnForceGold.disabled = true;
 
     try {
-      const { data: allCards, error: cardErr } = await supabaseClient.from('cards_definition').select('*');
-      if (cardErr || !allCards || !allCards.length) {
-        console.error('Chargement des cartes impossible :', cardErr);
-        showToast('Erreur lors du chargement des cartes.', 'error');
-        return;
-      }
-      if (forceGold && !allCards.some(c => rarityKey(c) === 'or')) {
-        showToast("Aucune carte Or dans la base : tirage normal.", 'info');
-      }
+      const { data: allCards } = await supabaseClient.from('cards_definition').select('*');
+      if (!allCards || !allCards.length) throw new Error('Erreur chargement cartes');
 
       const drawn = drawPack(allCards, forceGold);
       for (const card of drawn) {
-        const saveError = await saveCardToCollection(user.id, card);
-        if (saveError) {
-          console.error("Carte non enregistrée :", saveError);
-          showToast("Impossible d'enregistrer tes cartes.", 'error');
-          return;
+        const { data: existing } = await supabaseClient.from('user_cards').select('id, quantity').eq('user_id', user.id).eq('card_id', card.id).maybeSingle();
+        if (existing) {
+          await supabaseClient.from('user_cards').update({ quantity: existing.quantity + 1 }).eq('id', existing.id);
+        } else {
+          await supabaseClient.from('user_cards').insert([{ user_id: user.id, card_id: card.id, quantity: 1 }]);
         }
       }
 
       if (!isAdmin) {
         const now = new Date();
-        const { error: timerError } = await supabaseClient
-          .from('profiles').update({ last_pack_opened_at: now.toISOString() }).eq('id', user.id);
-        if (timerError) console.error("Timer du pack non enregistré :", timerError);
+        await supabaseClient.from('profiles').update({ last_pack_opened_at: now.toISOString() }).eq('id', user.id);
         nextPackAt = now.getTime() + PACK_COOLDOWN_MS;
       }
 
       await playPackAnimation(drawn);
       showToast('Cartes ajoutées à ta collection !', 'success');
     } catch (err) {
-      console.error("Erreur pendant l'ouverture du pack :", err);
-      showToast("Une erreur est survenue pendant l'ouverture du pack.", 'error');
+      showToast("Erreur pendant l'ouverture du pack.", 'error');
     } finally {
       isOpeningPack = false;
       if (currentUser) refreshPackUI();
@@ -629,109 +571,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (btnOpenPack) btnOpenPack.addEventListener('click', () => openPack(false));
   if (btnForceGold) btnForceGold.addEventListener('click', () => openPack(true));
 
-  const overlay = document.getElementById('fullscreen-reveal');
-  const boosterContainer = document.getElementById('booster-pack-container');
-  const cardsContainer = document.getElementById('revealed-cards-container');
-  const textCloseReveal = document.getElementById('text-close-reveal');
-  const godRays = document.getElementById('god-rays');
-  const goldSparkles = document.getElementById('gold-sparkles');
-  const boosterHint = document.querySelector('.booster-hint');
-
-  function closeOverlayNow() {
-    if (overlay) overlay.classList.add('hidden');
-    document.body.style.overflow = '';
-  }
-
-  function playPackAnimation(cards) {
-    return new Promise((resolve) => {
-      if (!overlay || !boosterContainer || !cardsContainer) { resolve(); return; }
-
-      const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-      const speed = reduceMotion ? 0.3 : 1;
-      const hasEpicCard = cards.some(c => rarityLevel(c) >= 3);
-      let canClose = false;
-      let opened = false;
-
-      boosterContainer.className = 'booster-wrapper';
-      cardsContainer.innerHTML = '';
-      cardsContainer.classList.add('hidden');
-      if (textCloseReveal) textCloseReveal.classList.add('hidden');
-      if (godRays) godRays.classList.add('hidden');
-      if (goldSparkles) goldSparkles.classList.add('hidden');
-      if (boosterHint) boosterHint.style.opacity = '1';
-
-      document.body.style.overflow = 'hidden';
-      overlay.classList.remove('hidden');
-      boosterContainer.focus();
-
-      const finish = () => {
-        overlay.removeEventListener('click', onOverlayClick);
-        document.removeEventListener('keydown', onKeyDown);
-        closeOverlayNow();
-        resolve();
-      };
-      function onOverlayClick() { if (canClose) finish(); }
-      function onKeyDown(e) {
-        if (!opened && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); openBooster(); }
-        else if (canClose && (e.key === 'Escape' || e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); finish(); }
-      }
-
-      async function openBooster() {
-        if (opened) return;
-        opened = true;
-        if (boosterHint) boosterHint.style.opacity = '0';
-
-        if (hasEpicCard) {
-          if (goldSparkles) goldSparkles.classList.remove('hidden');
-          boosterContainer.classList.add('gold-anticipation');
-          await wait(2500 * speed);
-        } else {
-          boosterContainer.classList.add('opening-shake');
-          await wait(600 * speed);
-        }
-
-        boosterContainer.classList.remove('opening-shake', 'gold-anticipation');
-        boosterContainer.classList.add('is-tearing');
-        if (hasEpicCard && godRays) godRays.classList.remove('hidden');
-        await wait(500 * speed);
-        boosterContainer.classList.add('hidden');
-
-        cards.forEach((card, index) => {
-          const el = createCardElement(card);
-          el.classList.add('card-reveal-anim');
-          if (rarityLevel(card) >= 3) el.classList.add('epic-card-ready');
-          el.style.animationDelay = (index * 0.4 * speed) + 's';
-          cardsContainer.appendChild(el);
-        });
-        cardsContainer.classList.remove('hidden');
-
-        await wait((cards.length * 400 + 1000) * speed);
-        cardsContainer.querySelectorAll('.epic-card-ready').forEach(el => {
-          el.style.animationDelay = '0s';
-          el.classList.add('gold-epic-reveal');
-        });
-        if (textCloseReveal) textCloseReveal.classList.remove('hidden');
-        canClose = true;
-      }
-
-      boosterContainer.addEventListener('click', (e) => { e.stopPropagation(); openBooster(); }, { once: true });
-      overlay.addEventListener('click', onOverlayClick);
-      document.addEventListener('keydown', onKeyDown);
-    });
-  }
-
-  // ===================================================================
-  //  PARTIE 4 — COLLECTION & FILTRES
-  // ===================================================================
-  let cachedAllCards = [];
-  let cachedUserCards = [];
-  let currentRaritySort = 'asc';
-  let currentOwnershipFilter = 'all';
-
   async function loadUserCollection(userId) {
     const grid = document.getElementById('collection-grid');
-    if (!grid || !supabaseClient) return;
-    grid.innerHTML = '<p class="grid-message">Chargement de ta collection...</p>';
+    if (grid) grid.innerHTML = '<p class="grid-message">Chargement...</p>';
 
     const [cardsRes, ownedRes] = await Promise.all([
       supabaseClient.from('cards_definition').select('*'),
@@ -739,11 +581,6 @@ document.addEventListener('DOMContentLoaded', () => {
     ]);
     if (!currentUser || currentUser.id !== userId) return;
 
-    if (cardsRes.error || ownedRes.error) {
-      console.error('Chargement de la collection impossible :', cardsRes.error || ownedRes.error);
-      grid.innerHTML = '<p class="grid-message">Impossible de charger ta collection.</p>';
-      return;
-    }
     cachedAllCards = cardsRes.data || [];
     cachedUserCards = ownedRes.data || [];
     renderFilteredCollection();
@@ -755,7 +592,6 @@ document.addEventListener('DOMContentLoaded', () => {
     grid.innerHTML = '';
 
     const ownedByCard = new Map(cachedUserCards.map(uc => [uc.card_id, uc]));
-
     const filtered = cachedAllCards.filter(card => {
       const isOwned = ownedByCard.has(card.id);
       if (currentOwnershipFilter === 'owned') return isOwned;
@@ -763,21 +599,18 @@ document.addEventListener('DOMContentLoaded', () => {
       return true;
     });
 
-    filtered.sort((a, b) => currentRaritySort === 'asc'
-      ? rarityLevel(a) - rarityLevel(b)
-      : rarityLevel(b) - rarityLevel(a));
+    filtered.sort((a, b) => currentRaritySort === 'asc' ? rarityLevel(a) - rarityLevel(b) : rarityLevel(b) - rarityLevel(a));
 
     if (filtered.length === 0) {
-      grid.innerHTML = '<p class="grid-message">Aucune carte ne correspond à ce filtre.</p>';
+      grid.innerHTML = '<p class="grid-message">Aucune carte trouvée.</p>';
       return;
     }
 
     filtered.forEach(card => {
-      const userCard = ownedByCard.get(card.id);
-      const isOwned = !!userCard;
+      const isOwned = !!ownedByCard.get(card.id);
       grid.appendChild(createCardElement(card, {
         locked: !isOwned,
-        qty: userCard ? userCard.quantity : 0,
+        qty: isOwned ? ownedByCard.get(card.id).quantity : 0,
         status: isOwned ? 'Débloquée' : '🔒 Verrouillée'
       }));
     });
@@ -798,16 +631,61 @@ document.addEventListener('DOMContentLoaded', () => {
       if (currentOwnershipFilter === 'all') {
         currentOwnershipFilter = 'owned';
         btnFilterStatus.textContent = 'Affichage : Possédées';
-        btnFilterStatus.classList.add('active-filter');
       } else if (currentOwnershipFilter === 'owned') {
         currentOwnershipFilter = 'locked';
         btnFilterStatus.textContent = 'Affichage : Non possédées';
       } else {
         currentOwnershipFilter = 'all';
         btnFilterStatus.textContent = 'Affichage : Toutes';
-        btnFilterStatus.classList.remove('active-filter');
       }
       renderFilteredCollection();
+    });
+  }
+
+  // Animation Pack
+  const overlay = document.getElementById('fullscreen-reveal');
+  const boosterContainer = document.getElementById('booster-pack-container');
+  const cardsContainer = document.getElementById('revealed-cards-container');
+
+  function closeOverlayNow() {
+    if (overlay) overlay.classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+
+  function playPackAnimation(cards) {
+    return new Promise((resolve) => {
+      if (!overlay || !boosterContainer) { resolve(); return; }
+
+      boosterContainer.className = 'booster-wrapper';
+      cardsContainer.innerHTML = '';
+      cardsContainer.classList.add('hidden');
+      document.body.style.overflow = 'hidden';
+      overlay.classList.remove('hidden');
+      boosterContainer.focus();
+
+      const finish = () => { closeOverlayNow(); resolve(); };
+      
+      async function openBooster() {
+        boosterContainer.classList.add('opening-shake');
+        await wait(600);
+        boosterContainer.classList.remove('opening-shake');
+        boosterContainer.classList.add('is-tearing');
+        await wait(500);
+        boosterContainer.classList.add('hidden');
+
+        cards.forEach((card, index) => {
+          const el = createCardElement(card);
+          el.classList.add('card-reveal-anim');
+          el.style.animationDelay = (index * 0.4) + 's';
+          cardsContainer.appendChild(el);
+        });
+        cardsContainer.classList.remove('hidden');
+
+        setTimeout(finish, cards.length * 400 + 2000); // Ferme auto après visionnage
+      }
+
+      boosterContainer.addEventListener('click', openBooster, { once: true });
+      overlay.addEventListener('click', finish);
     });
   }
 
@@ -818,37 +696,14 @@ document.addEventListener('DOMContentLoaded', () => {
     const listEl = document.getElementById('online-players-list');
     if (!listEl || !supabaseClient) return;
 
-    const { data: profiles, error } = await supabaseClient
-      .from('profiles').select('id, username, created_at').order('created_at', { ascending: false });
-
+    const { data: profiles } = await supabaseClient.from('profiles').select('id, username').order('created_at', { ascending: false });
     listEl.innerHTML = '';
-    if (error || !profiles) {
-      console.error('Liste des joueurs impossible :', error);
-      const li = document.createElement('li');
-      li.textContent = 'Impossible de charger la liste.';
-      listEl.appendChild(li);
-      return;
-    }
 
-    profiles.forEach(p => {
-      const name = p.username || '?';
+    (profiles || []).forEach(p => {
       const li = document.createElement('li');
       li.className = 'player-row-item';
-
-      const avatar = document.createElement('div');
-      avatar.className = 'player-mini-avatar';
-      avatar.textContent = name.charAt(0).toUpperCase();
-
-      const label = document.createElement('span');
-      label.textContent = name;
-
-      li.append(avatar, label);
-      if (currentUser && p.id === currentUser.id) {
-        const you = document.createElement('em');
-        you.className = 'player-you';
-        you.textContent = 'toi';
-        li.appendChild(you);
-      }
+      li.innerHTML = `<div class="player-mini-avatar">${(p.username || '?').charAt(0).toUpperCase()}</div><span>${p.username}</span>`;
+      if (currentUser && p.id === currentUser.id) li.innerHTML += `<em class="player-you">toi</em>`;
       listEl.appendChild(li);
     });
   }
@@ -869,33 +724,18 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function handleSignedOut() {
-    currentUser = null;
-    loadedUserId = null;
-    isAdmin = false;
-    nextPackAt = 0;
-    isOpeningPack = false;
+    currentUser = null; loadedUserId = null; isAdmin = false; nextPackAt = 0;
     if (packTimerInterval) clearInterval(packTimerInterval);
-    cachedAllCards = [];
-    cachedUserCards = [];
-
-    closeOverlayNow();
-    if (roleBadge) { roleBadge.textContent = defaultRoleText; roleBadge.style.color = ''; }
-    if (btnForceGold) { btnForceGold.style.display = 'none'; btnForceGold.disabled = false; }
-    if (btnOpenPack) btnOpenPack.disabled = true;
-    if (packTimerText) packTimerText.textContent = 'Vérification du timer...';
-    const grid = document.getElementById('collection-grid');
-    if (grid) grid.innerHTML = '';
-    const listEl = document.getElementById('online-players-list');
-    if (listEl) listEl.innerHTML = '<li>Chargement...</li>';
-    showTab('tab-packs');
-
+    cachedAllCards = []; cachedUserCards = [];
+    closeOverlayNow(); closeTradeRoom();
+    
     if (authContainer) authContainer.style.display = 'block';
     if (gameDashboard) gameDashboard.style.display = 'none';
     document.body.classList.remove('game-logged-in');
     setMode(true);
   }
 
-  if (supabaseClient && (authContainer || gameDashboard)) {
+  if (supabaseClient) {
     supabaseClient.auth.onAuthStateChange((event, session) => {
       if (session && session.user) handleSignedIn(session.user);
       else handleSignedOut();
@@ -903,9 +743,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (btnLogout) {
       btnLogout.addEventListener('click', async () => {
-        const { error } = await supabaseClient.auth.signOut();
-        if (error) showToast(translateError(error), 'error');
-        else showToast('Tu es déconnecté. À bientôt !', 'info');
+        await supabaseClient.auth.signOut();
+        showToast('Tu es déconnecté. À bientôt !', 'info');
       });
     }
   }
@@ -917,7 +756,6 @@ document.addEventListener('DOMContentLoaded', () => {
   let tradeRealtimeChannel = null;
   let selectedTradeCardId = null;
 
-  // 1. Éléments HTML des échanges
   const exchangeLobby = document.getElementById('exchange-lobby');
   const exchangeRoom = document.getElementById('exchange-room');
   const exchangePlayersGrid = document.getElementById('exchange-players-grid');
@@ -935,25 +773,21 @@ document.addEventListener('DOMContentLoaded', () => {
 
   const myTradeSlot = document.getElementById('my-trade-slot');
   const opponentTradeSlot = document.getElementById('opponent-trade-slot');
-  const btnPickTradeCard = document.getElementById('btn-pick-trade-card');
   const btnLockMyTrade = document.getElementById('btn-lock-my-trade');
   const myLockStatus = document.getElementById('my-lock-status');
   const opponentLockStatus = document.getElementById('opponent-lock-status');
+  const opponentLockShield = document.getElementById('opponent-lock-shield');
   const btnCancelTrade = document.getElementById('btn-cancel-trade');
   const pickerCollectionGrid = document.getElementById('picker-collection-grid');
   const closePickerModal = document.querySelector('.close-picker-modal');
 
-  // 2. Charger la liste des joueurs disponibles pour échanger
   async function loadExchangePlayers() {
     if (!exchangePlayersGrid || !supabaseClient || !currentUser) return;
 
-    const { data: profiles, error } = await supabaseClient
-      .from('profiles')
-      .select('id, username')
-      .neq('id', currentUser.id);
+    const { data: profiles } = await supabaseClient.from('profiles').select('id, username').neq('id', currentUser.id);
 
     exchangePlayersGrid.innerHTML = '';
-    if (error || !profiles || profiles.length === 0) {
+    if (!profiles || profiles.length === 0) {
       exchangePlayersGrid.innerHTML = '<p class="grid-message">Aucun autre joueur disponible pour le moment.</p>';
       return;
     }
@@ -961,15 +795,12 @@ document.addEventListener('DOMContentLoaded', () => {
     profiles.forEach(p => {
       const card = document.createElement('div');
       card.className = 'exchange-player-card';
-
       const avatar = document.createElement('div');
       avatar.className = 'player-mini-avatar';
       avatar.textContent = (p.username || '?').charAt(0).toUpperCase();
-
       const info = document.createElement('div');
       info.className = 'exchange-player-info';
       info.innerHTML = `<h4>${p.username || 'Joueur'}</h4>`;
-
       const btn = document.createElement('button');
       btn.className = 'btn-invite';
       btn.textContent = 'Proposer un échange';
@@ -980,64 +811,42 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 3. Envoyer une invitation
   async function sendTradeInvite(receiverId, receiverName) {
     if (!currentUser || !supabaseClient) return;
-
-    const { data, error } = await supabaseClient
-      .from('trades')
-      .insert([{ sender_id: currentUser.id, receiver_id: receiverId, status: 'pending' }])
-      .select()
-      .single();
-
+    const { data, error } = await supabaseClient.from('trades').insert([{ sender_id: currentUser.id, receiver_id: receiverId, status: 'pending' }]).select().single();
+    
     if (error) {
-      showToast("Impossible d'envoyer la demande d'échange.", 'error');
-      console.error(error);
+      showToast("Impossible d'envoyer la demande.", 'error');
       return;
     }
-
     currentTrade = data;
     showToast(`Invitation envoyée à ${receiverName} !`, 'info');
   }
 
-  // 4. Écoute en Temps Réel (Supabase Realtime)
   function initTradeRealtime() {
     if (!supabaseClient || !currentUser) return;
-
     if (tradeRealtimeChannel) supabaseClient.removeChannel(tradeRealtimeChannel);
 
     tradeRealtimeChannel = supabaseClient
       .channel('public:trades')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'trades' }, payload => {
         const trade = payload.new;
-        if (!trade) return;
-
-        // Si l'échange concerne le joueur connecté
-        if (trade.sender_id === currentUser.id || trade.receiver_id === currentUser.id) {
+        if (trade && (trade.sender_id === currentUser.id || trade.receiver_id === currentUser.id)) {
           handleTradeUpdate(trade);
         }
-      })
-      .subscribe();
+      }).subscribe();
   }
 
-  // 5. Gestion des mises à jour d'échange
   async function handleTradeUpdate(trade) {
     currentTrade = trade;
 
-    // A. Réception d'une nouvelle invitation
     if (trade.status === 'pending' && trade.receiver_id === currentUser.id) {
-      const { data: senderProfile } = await supabaseClient
-        .from('profiles')
-        .select('username')
-        .eq('id', trade.sender_id)
-        .single();
-
+      const { data: senderProfile } = await supabaseClient.from('profiles').select('username').eq('id', trade.sender_id).single();
       if (inviteSenderName) inviteSenderName.textContent = senderProfile ? senderProfile.username : 'Un joueur';
       if (tradeInviteModal) tradeInviteModal.style.display = 'flex';
       return;
     }
 
-    // B. Invitation refusée ou annulée
     if (trade.status === 'declined' || trade.status === 'canceled') {
       closeTradeRoom();
       if (tradeInviteModal) tradeInviteModal.style.display = 'none';
@@ -1045,38 +854,32 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    // C. Échange actif : ouverture ou mise à jour de l'arène
     if (trade.status === 'active') {
       if (tradeInviteModal) tradeInviteModal.style.display = 'none';
       renderTradeRoom(trade);
       return;
     }
 
-    // D. Échange terminé avec succès
     if (trade.status === 'completed') {
       closeTradeRoom();
-      showToast('🎉 Échange réussi ! Les cartes ont été transférées dans ton album.', 'success');
+      showToast('🎉 Échange réussi !', 'success');
       loadUserCollection(currentUser.id);
     }
   }
 
-  // 6. Accepter / Refuser une invitation
   if (btnAcceptInvite) {
     btnAcceptInvite.addEventListener('click', async () => {
-      if (!currentTrade) return;
-      await supabaseClient.from('trades').update({ status: 'active' }).eq('id', currentTrade.id);
+      if (currentTrade) await supabaseClient.from('trades').update({ status: 'active' }).eq('id', currentTrade.id);
     });
   }
 
   if (btnDeclineInvite) {
     btnDeclineInvite.addEventListener('click', async () => {
-      if (!currentTrade) return;
-      await supabaseClient.from('trades').update({ status: 'declined' }).eq('id', currentTrade.id);
+      if (currentTrade) await supabaseClient.from('trades').update({ status: 'declined' }).eq('id', currentTrade.id);
       if (tradeInviteModal) tradeInviteModal.style.display = 'none';
     });
   }
 
-  // 7. Rendu de la salle d'échange
   async function renderTradeRoom(trade) {
     if (exchangeLobby) exchangeLobby.style.display = 'none';
     if (exchangeRoom) exchangeRoom.style.display = 'block';
@@ -1084,7 +887,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const isSender = trade.sender_id === currentUser.id;
     const opponentId = isSender ? trade.receiver_id : trade.sender_id;
 
-    // Profil de l'adversaire
     const { data: oppProfile } = await supabaseClient.from('profiles').select('username').eq('id', opponentId).single();
     const oppName = oppProfile ? oppProfile.username : 'Adversaire';
 
@@ -1095,20 +897,25 @@ document.addEventListener('DOMContentLoaded', () => {
       tradeMyAvatar.textContent = myName.charAt(0).toUpperCase();
     }
 
-    // Cartes posées
     const myCardId = isSender ? trade.sender_card_id : trade.receiver_card_id;
     const oppCardId = isSender ? trade.receiver_card_id : trade.sender_card_id;
-
     const myLocked = isSender ? trade.sender_locked : trade.receiver_locked;
     const oppLocked = isSender ? trade.receiver_locked : trade.sender_locked;
 
-    // Mise à jour de mon emplacement
     if (myCardId) {
       const cardDef = cachedAllCards.find(c => c.id === myCardId);
       if (cardDef) {
         myTradeSlot.innerHTML = '';
         myTradeSlot.classList.add('has-card');
-        myTradeSlot.appendChild(createCardElement(cardDef));
+        const cardEl = createCardElement(cardDef);
+        
+        // Permet de cliquer sur la carte pour la changer (si non validée)
+        if (!myLocked) {
+          cardEl.style.cursor = 'pointer';
+          cardEl.title = "Clique pour changer de carte";
+          cardEl.addEventListener('click', openCardPicker);
+        }
+        myTradeSlot.appendChild(cardEl);
       }
     } else {
       myTradeSlot.classList.remove('has-card');
@@ -1116,7 +923,6 @@ document.addEventListener('DOMContentLoaded', () => {
       document.getElementById('btn-pick-trade-card').addEventListener('click', openCardPicker);
     }
 
-    // Mise à jour de l'emplacement adverse
     if (oppCardId) {
       const cardDef = cachedAllCards.find(c => c.id === oppCardId);
       if (cardDef) {
@@ -1129,41 +935,35 @@ document.addEventListener('DOMContentLoaded', () => {
       opponentTradeSlot.innerHTML = '<div class="empty-slot-text">Choisit une carte...</div>';
     }
 
-    // États des verrous
     if (btnLockMyTrade) {
       btnLockMyTrade.disabled = !myCardId || myLocked;
       btnLockMyTrade.textContent = myLocked ? '🔒 Carte validée' : 'Valider ma carte';
     }
     if (myLockStatus) myLockStatus.textContent = myLocked ? 'Prêt pour l\'échange !' : 'Sélectionne et valide ta carte.';
     if (opponentLockStatus) opponentLockStatus.textContent = oppLocked ? '🔒 Adversaire prêt !' : 'En train de choisir...';
+    if (opponentLockShield) opponentLockShield.style.display = oppLocked ? 'block' : 'none';
 
-    // Déclenchement automatique de la transaction SQL si les deux joueurs ont verrouillé
+    // Seul l'expéditeur initialise la requête SQL pour éviter les conflits
     if (myLocked && oppLocked && isSender) {
       executeTradeTransaction(trade.id);
     }
   }
 
-  // 8. Transaction sécurisée côté serveur
   async function executeTradeTransaction(tradeId) {
     if (tradeStatusIndicator) tradeStatusIndicator.textContent = 'Échange en cours de finalisation...';
-    
     const { data, error } = await supabaseClient.rpc('execute_trade', { trade_uuid: tradeId });
-
     if (error || !data) {
-      console.error('Erreur transaction :', error);
-      showToast("Erreur lors de l'échange. Vérifiez que vous avez bien les cartes.", 'error');
+      showToast("Erreur lors de l'échange.", 'error');
     }
   }
 
-  // 9. Modale de sélection de carte
   function openCardPicker() {
     if (!pickerCollectionGrid || !cardPickerModal) return;
-
     pickerCollectionGrid.innerHTML = '';
     const ownedCards = cachedUserCards.filter(uc => uc.quantity > 0);
 
     if (ownedCards.length === 0) {
-      pickerCollectionGrid.innerHTML = '<p class="grid-message">Tu n\'as aucune carte disponible à échanger.</p>';
+      pickerCollectionGrid.innerHTML = '<p class="grid-message">Tu n\'as aucune carte disponible.</p>';
       cardPickerModal.style.display = 'flex';
       return;
     }
@@ -1171,15 +971,12 @@ document.addEventListener('DOMContentLoaded', () => {
     ownedCards.forEach(uc => {
       const cardDef = cachedAllCards.find(c => c.id === uc.card_id);
       if (!cardDef) return;
-
       const el = createCardElement(cardDef, { qty: uc.quantity });
       el.addEventListener('click', async () => {
         selectedTradeCardId = cardDef.id;
         cardPickerModal.style.display = 'none';
-
         const isSender = currentTrade.sender_id === currentUser.id;
         const updateData = isSender ? { sender_card_id: selectedTradeCardId } : { receiver_card_id: selectedTradeCardId };
-
         await supabaseClient.from('trades').update(updateData).eq('id', currentTrade.id);
       });
       pickerCollectionGrid.appendChild(el);
@@ -1190,7 +987,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
   if (closePickerModal) closePickerModal.addEventListener('click', () => cardPickerModal.style.display = 'none');
 
-  // 10. Bouton "Valider ma carte"
   if (btnLockMyTrade) {
     btnLockMyTrade.addEventListener('click', async () => {
       if (!currentTrade) return;
@@ -1200,7 +996,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  // 11. Annuler l'échange
   if (btnCancelTrade) {
     btnCancelTrade.addEventListener('click', async () => {
       if (!currentTrade) return;
@@ -1217,14 +1012,4 @@ document.addEventListener('DOMContentLoaded', () => {
     loadExchangePlayers();
   }
 
-  // Lancer le chargement des échanges lors de l'ouverture de l'onglet
-  const oldShowTab = showTab;
-  showTab = function(tabId) {
-    oldShowTab(tabId);
-    if (tabId === 'tab-exchange' && currentUser) {
-      loadExchangePlayers();
-      initTradeRealtime();
-    }
-  };
-
-})
+});
