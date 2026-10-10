@@ -641,12 +641,92 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // ===================================================================
-  // ANIMATION DU PACK (RECONSTRUITE APRÈS LA PERTE DU COMMIT)
+  // ANIMATION DU PACK (v2)
+  //  - le pack et les cartes sont centrés par le CSS (même cellule de grille)
+  //  - les cartes sortent du pack, s'éventaillent, puis se retournent une à une
+  //  - la carte Or se retourne en dernier : suspense, flash, particules, mise en avant
   // ===================================================================
+  const reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
   function closeOverlayNow() {
     const overlay = document.getElementById('fullscreen-reveal');
     if (overlay) overlay.classList.add('hidden');
     document.body.style.overflow = '';
+  }
+
+  // Crée un élément utile à l'animation s'il n'existe pas déjà dans la page
+  function getOrCreate(parent, id, className) {
+    let el = document.getElementById(id);
+    if (!el) {
+      el = document.createElement('div');
+      el.id = id;
+      el.className = className;
+      parent.appendChild(el);
+    }
+    return el;
+  }
+
+  // Une particule lumineuse qui part de (x, y) et se déplace de (dx, dy)
+  function spawnSpark(layer, x, y, dx, dy, size, duration, white) {
+    if (!layer || reduceMotion) return;
+    const s = document.createElement('i');
+    s.className = 'spark' + (white ? ' spark-white' : '');
+    s.style.left = x + 'px';
+    s.style.top = y + 'px';
+    s.style.setProperty('--dx', dx + 'px');
+    s.style.setProperty('--dy', dy + 'px');
+    s.style.setProperty('--size', size + 'px');
+    s.style.animationDuration = duration + 'ms';
+    s.addEventListener('animationend', () => s.remove());
+    layer.appendChild(s);
+  }
+
+  // Explosion de particules autour d'un point
+  function burstAt(layer, x, y, count, power) {
+    for (let i = 0; i < count; i++) {
+      const angle = Math.random() * Math.PI * 2;
+      const dist = power * (0.5 + Math.random() * 0.8);
+      spawnSpark(layer, x, y, Math.cos(angle) * dist, Math.sin(angle) * dist, 4 + Math.random() * 8, 700 + Math.random() * 600, Math.random() < 0.3);
+    }
+  }
+
+  // Particules aspirées vers le pack pendant la charge. Retourne une fonction pour l'arrêter.
+  function startChargeSparks(layer, target) {
+    if (!layer || !target || reduceMotion) return () => {};
+    const timer = setInterval(() => {
+      const r = target.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const angle = Math.random() * Math.PI * 2;
+      const dist = Math.max(r.width, 140) * (0.9 + Math.random() * 0.7);
+      spawnSpark(layer, cx + Math.cos(angle) * dist, cy + Math.sin(angle) * dist, -Math.cos(angle) * dist, -Math.sin(angle) * dist, 5 + Math.random() * 6, 700 + Math.random() * 400, false);
+    }, 70);
+    return () => clearInterval(timer);
+  }
+
+  // Construit une carte retournable : dos (mystère) + face avant (la vraie carte du jeu)
+  function buildRevealCard(card, index) {
+    const slot = document.createElement('div');
+    slot.className = 'reveal-card ' + rarityKey(card) + (rarityLevel(card) >= 3 ? ' is-gold' : '');
+    slot.style.setProperty('--i', index);
+
+    const inner = document.createElement('div');
+    inner.className = 'reveal-card-inner';
+
+    const back = document.createElement('div');
+    back.className = 'reveal-card-face reveal-card-back';
+    const mark = document.createElement('span');
+    mark.textContent = 'MRC';
+    back.appendChild(mark);
+
+    const front = document.createElement('div');
+    front.className = 'reveal-card-face reveal-card-front';
+    front.appendChild(createCardElement(card));
+
+    inner.appendChild(back);
+    inner.appendChild(front);
+    slot.appendChild(inner);
+    return slot;
   }
 
   function playPackAnimation(cards) {
@@ -655,28 +735,41 @@ document.addEventListener('DOMContentLoaded', () => {
       const boosterContainer = document.getElementById('booster-pack-container');
       const cardsContainer = document.getElementById('revealed-cards-container');
       const godRays = document.getElementById('god-rays');
-      const goldSparkles = document.getElementById('gold-sparkles');
+      const sparkLayer = document.getElementById('gold-sparkles');
       const textCloseReveal = document.getElementById('text-close-reveal');
-      const boosterHint = document.querySelector('.booster-hint');
 
-      if (!overlay || !boosterContainer) { resolve(); return; }
+      if (!overlay || !boosterContainer || !cardsContainer) { resolve(); return; }
 
-      // Détection de la meilleure carte
-      const maxWeightInPack = Math.max(...cards.map(c => rarityLevel(c)));
-      const hasEpicCard = maxWeightInPack >= 3;
+      const flash = getOrCreate(overlay, 'reveal-flash', 'reveal-flash');
+      const banner = getOrCreate(overlay, 'reveal-banner', 'reveal-banner');
+      const boosterPack = boosterContainer.querySelector('.booster-pack');
+
+      const goldCount = cards.filter(c => rarityLevel(c) >= 3).length;
+      const hasGold = goldCount > 0;
+
+      function fireFlash(gold) {
+        flash.classList.remove('is-flashing', 'is-gold-flash');
+        void flash.offsetWidth; // relance l'animation
+        if (gold) flash.classList.add('is-gold-flash');
+        flash.classList.add('is-flashing');
+      }
 
       // Réinitialisation de l'UI
+      overlay.classList.remove('is-gold-mode');
       boosterContainer.className = 'booster-wrapper';
+      cardsContainer.className = 'revealed-cards-grid hidden';
       cardsContainer.innerHTML = '';
-      cardsContainer.classList.add('hidden');
+      cardsContainer.style.setProperty('--c', (cards.length - 1) / 2);
       if (textCloseReveal) textCloseReveal.classList.add('hidden');
       if (godRays) godRays.classList.add('hidden');
-      if (goldSparkles) goldSparkles.classList.add('hidden');
-      if (boosterHint) boosterHint.style.opacity = '1';
+      if (sparkLayer) { sparkLayer.classList.remove('hidden'); sparkLayer.innerHTML = ''; }
+      banner.classList.remove('is-visible');
+      banner.textContent = goldCount > 1 ? 'Cartes Or !' : 'Carte Or !';
+      flash.classList.remove('is-flashing', 'is-gold-flash');
 
       document.body.style.overflow = 'hidden';
       overlay.classList.remove('hidden');
-      boosterContainer.focus();
+      boosterContainer.focus({ preventScroll: true });
 
       let isClosing = false;
       const finish = () => {
@@ -686,54 +779,105 @@ document.addEventListener('DOMContentLoaded', () => {
         overlay.removeEventListener('click', finish);
         resolve();
       };
-      
+
+      let started = false;
+      let stopSparks = () => {};
+
       async function openBooster(e) {
-        e.stopPropagation();
+        if (e) e.stopPropagation();
+        if (started) return;
+        started = true;
         boosterContainer.removeEventListener('click', openBooster);
-        if (boosterHint) boosterHint.style.opacity = '0';
+        boosterContainer.removeEventListener('keydown', onKeyDown);
+        boosterContainer.classList.add('is-opened');
 
-        // 1. ANTICIPATION
-        if (hasEpicCard) {
-          if (goldSparkles) goldSparkles.classList.remove('hidden');
-          boosterContainer.classList.add('gold-anticipation');
-          await wait(2500);
-        } else {
-          boosterContainer.classList.add('opening-shake');
-          await wait(600);
-        }
+        try {
+          // 1. CHARGE : le pack tremble (et brille / lévite s'il y a une carte Or)
+          if (hasGold) {
+            overlay.classList.add('is-gold-mode');
+            boosterContainer.classList.add('gold-anticipation', 'is-charging');
+            stopSparks = startChargeSparks(sparkLayer, boosterPack);
+            await wait(2400);
+            stopSparks();
+          } else {
+            boosterContainer.classList.add('is-charging');
+            await wait(700);
+          }
 
-        // 2. DÉCHIRURE
-        boosterContainer.classList.remove('opening-shake', 'gold-anticipation');
-        boosterContainer.classList.add('is-tearing');
-        if (hasEpicCard && godRays) godRays.classList.remove('hidden');
+          // 2. DÉCHIRURE : flash + les deux moitiés s'envolent
+          boosterContainer.classList.remove('is-charging');
+          boosterContainer.classList.add('is-tearing');
+          fireFlash(hasGold);
+          if (hasGold && godRays) godRays.classList.remove('hidden');
+          const pr = boosterContainer.getBoundingClientRect();
+          burstAt(sparkLayer, pr.left + pr.width / 2, pr.top + pr.height * 0.43, hasGold ? 42 : 16, hasGold ? 340 : 220);
+          await wait(450);
+          boosterContainer.classList.add('hidden');
 
-        await wait(500);
-        boosterContainer.classList.add('hidden');
+          // 3. LES CARTES sortent du pack (empilées au centre) puis s'écartent en rangée
+          const slots = cards.map(buildRevealCard);
+          slots.forEach(s => cardsContainer.appendChild(s));
+          cardsContainer.classList.remove('hidden');
+          void cardsContainer.offsetWidth; // force le navigateur à enregistrer l'état de départ
+          cardsContainer.classList.add('is-dealt');
+          await wait(500);
+          cardsContainer.classList.add('is-spread');
+          await wait(850);
 
-        // 3. APPARITION DES CARTES
-        cards.forEach((card, index) => {
-          const el = createCardElement(card);
-          el.classList.add('card-reveal-anim');
-          // Marqueur pour déclencher l'aura lumineuse plus tard
-          if (rarityLevel(card) >= 3) el.classList.add('epic-card-ready');
-          el.style.animationDelay = (index * 0.4) + 's';
-          cardsContainer.appendChild(el);
-        });
+          // Les dos des cartes Or se mettent à briller : suspense
+          slots.forEach(s => { if (s.classList.contains('is-gold')) s.classList.add('is-tease'); });
 
-        cardsContainer.classList.remove('hidden');
+          // 4. RETOURNEMENT une à une (l'ordre est déjà Bronze -> Argent -> Or)
+          for (let i = 0; i < slots.length; i++) {
+            const slot = slots[i];
+            const level = rarityLevel(cards[i]);
 
-        // 4. RÉVÉLATION FINALE & AUTORISATION DE FERMETURE
-        const totalRevealTime = (cards.length * 400) + 1000;
-        setTimeout(() => {
-          cardsContainer.querySelectorAll('.epic-card-ready').forEach(el => {
-            el.classList.add('gold-epic-reveal');
-          });
+            if (level >= 3) {
+              await wait(650); // petite pause avant la carte Or
+              slot.classList.add('is-flipped');
+              await wait(380); // la carte est à mi-retournement : on déclenche les effets
+              fireFlash(true);
+              const r = slot.getBoundingClientRect();
+              burstAt(sparkLayer, r.left + r.width / 2, r.top + r.height / 2, 38, Math.max(r.width, 160) * 1.4);
+              if (godRays) godRays.classList.remove('hidden');
+              overlay.classList.add('is-gold-mode');
+              cardsContainer.classList.add('has-gold-focus');
+              slot.classList.add('is-focus');
+              banner.classList.add('is-visible');
+              await wait(800);
+            } else {
+              slot.classList.add('is-flipped');
+              if (level === 2) {
+                const r = slot.getBoundingClientRect();
+                burstAt(sparkLayer, r.left + r.width / 2, r.top + r.height / 2, 8, Math.max(r.width, 120));
+              }
+              await wait(480);
+            }
+          }
+
+          // 5. FIN : on autorise la fermeture
+          await wait(300);
           if (textCloseReveal) textCloseReveal.classList.remove('hidden');
           overlay.addEventListener('click', finish);
-        }, totalRevealTime);
+        } catch (err) {
+          // Si quelque chose plante, on ne bloque jamais le joueur : il peut fermer l'écran
+          console.error('Erreur animation pack :', err);
+          stopSparks();
+          cardsContainer.classList.remove('hidden');
+          if (textCloseReveal) textCloseReveal.classList.remove('hidden');
+          overlay.addEventListener('click', finish);
+        }
+      }
+
+      function onKeyDown(ev) {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          openBooster(ev);
+        }
       }
 
       boosterContainer.addEventListener('click', openBooster);
+      boosterContainer.addEventListener('keydown', onKeyDown);
     });
   }
 
