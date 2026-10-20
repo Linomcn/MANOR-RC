@@ -6,7 +6,7 @@
 const SUPABASE_URL = 'https://weolphofgqltwazxeshm.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_BrJ9UhFgxWemyWrAEW4CYQ_54YeCIr4';
 
-const PACK_COOLDOWN_MS = 5 * 60 * 100;
+const PACK_COOLDOWN_MS = 5 * 60 * 1000;
 const CARDS_PER_PACK = 3;
 const PACK_ODDS = { bronze: 70, argent: 25, or: 5 };
 const RARITY_ORDER = { bronze: 1, argent: 2, or: 3 };
@@ -30,7 +30,7 @@ function statIcon(key) {
   return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (STAT_ICON_PATHS[key] || '') + '</svg>';
 }
 const WINS_FOR_GOLD_PACK = 3;
-const BATTLE_INVITE_TIMEOUT_MS = 60 * 100;
+const BATTLE_INVITE_TIMEOUT_MS = 60 * 1000;
 
 let supabaseClient = null;
 
@@ -591,30 +591,43 @@ document.addEventListener('DOMContentLoaded', () => {
     if (btnForceGold) btnForceGold.disabled = true;
 
     try {
-      const { data: allCards } = await supabaseClient.from('cards_definition').select('*');
-      if (!allCards || !allCards.length) throw new Error('Erreur chargement cartes');
+      // 1. Récupération avec gestion d'erreur
+      const { data: allCards, error: cardsErr } = await supabaseClient.from('cards_definition').select('*');
+      if (cardsErr || !allCards || !allCards.length) throw new Error('Erreur chargement cartes');
 
       const drawn = drawPack(allCards, forceGold);
+      
+      // 2. Insertion sécurisée
       for (const card of drawn) {
-        const { data: existing } = await supabaseClient.from('user_cards').select('id, quantity').eq('user_id', user.id).eq('card_id', card.id).maybeSingle();
+        const { data: existing, error: existErr } = await supabaseClient.from('user_cards')
+          .select('id, quantity').eq('user_id', user.id).eq('card_id', card.id).maybeSingle();
+        
         if (existing) {
-          await supabaseClient.from('user_cards').update({ quantity: existing.quantity + 1 }).eq('id', existing.id);
+          await supabaseClient.from('user_cards')
+            .update({ quantity: existing.quantity + 1 }).eq('id', existing.id);
         } else {
-          await supabaseClient.from('user_cards').insert([{ user_id: user.id, card_id: card.id, quantity: 1 }]);
+          await supabaseClient.from('user_cards')
+            .insert([{ user_id: user.id, card_id: card.id, quantity: 1 }]);
         }
       }
 
+      // 3. Mise à jour du temps
       if (!isAdmin) {
         const now = new Date();
-        await supabaseClient.from('profiles').update({ last_pack_opened_at: now.toISOString() }).eq('id', user.id);
+        await supabaseClient.from('profiles')
+          .update({ last_pack_opened_at: now.toISOString() }).eq('id', user.id);
         nextPackAt = now.getTime() + PACK_COOLDOWN_MS;
       }
 
+      // 4. On lance l'animation
       await playPackAnimation(drawn);
       showToast('Cartes ajoutées à ta collection !', 'success');
+
     } catch (err) {
-      showToast("Erreur pendant l'ouverture du pack.", 'error');
+      console.error(err);
+      showToast("Erreur pendant l'ouverture du pack. Réessaie.", 'error');
     } finally {
+      // On débloque TOUJOURS le bouton à la fin
       isOpeningPack = false;
       if (currentUser) refreshPackUI();
     }
@@ -831,8 +844,15 @@ document.addEventListener('DOMContentLoaded', () => {
         isClosing = true;
         closeOverlayNow();
         overlay.removeEventListener('click', finish);
-        resolve();
+        document.removeEventListener('keydown', forceEscape); // Retire l'écouteur Échap
+        resolve(); // Débloque le bouton
       };
+
+      // NOUVEAU : Permet de débloquer l'écran avec la touche Échap
+      const forceEscape = (ev) => {
+        if (ev.key === 'Escape') finish();
+      };
+      document.addEventListener('keydown', forceEscape);
 
       let started = false;
       let stopSparks = () => {};
