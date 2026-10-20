@@ -13,11 +13,22 @@ const RARITY_ORDER = { bronze: 1, argent: 2, or: 3 };
 
 // --- Combat ---
 const BATTLE_STATS = [
-  { key: 'attack',  label: 'Attaque',  short: 'ATT', icon: '⚔️' },
-  { key: 'defense', label: 'Défense',  short: 'DÉF', icon: '🛡️' },
-  { key: 'control', label: 'Contrôle', short: 'CTR', icon: '🎯' },
-  { key: 'speed',   label: 'Vitesse',  short: 'VIT', icon: '⚡' }
+  { key: 'attack',  label: 'Attaque',  short: 'ATT' },
+  { key: 'defense', label: 'Défense',  short: 'DÉF' },
+  { key: 'control', label: 'Contrôle', short: 'CTR' },
+  { key: 'speed',   label: 'Vitesse',  short: 'VIT' }
 ];
+
+const STAT_ICON_PATHS = {
+  attack:  '<polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" y1="19" x2="19" y2="13"/><line x1="16" y1="16" x2="20" y2="20"/><line x1="19" y1="21" x2="21" y2="19"/>',
+  defense: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+  control: '<circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/>',
+  speed:   '<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>'
+};
+
+function statIcon(key) {
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (STAT_ICON_PATHS[key] || '') + '</svg>';
+}
 const WINS_FOR_GOLD_PACK = 3;
 const BATTLE_INVITE_TIMEOUT_MS = 60 * 100;
 
@@ -118,11 +129,16 @@ function createCardElement(card, options = {}) {
   if (options.showStats && card.attack != null) {
     const stats = document.createElement('div');
     stats.className = 'card-stats';
-    BATTLE_STATS.forEach(st => {
-      const span = document.createElement('span');
-      span.dataset.stat = st.key;
-      span.textContent = st.icon + ' ' + st.short + ' ' + card[st.key];
-      stats.appendChild(span);
+        BATTLE_STATS.forEach(st => {
+      const value = Number(card[st.key]) || 0;
+      const row = document.createElement('div');
+      row.className = 'stat-row';
+      row.dataset.stat = st.key;
+      row.innerHTML = statIcon(st.key) +
+        '<span class="stat-name">' + st.short + '</span>' +
+        '<span class="stat-bar"><i style="width:' + Math.min(100, value) + '%"></i></span>' +
+        '<b class="stat-value">' + value + '</b>';
+      stats.appendChild(row);
     });
     el.appendChild(stats);
   }
@@ -1261,25 +1277,25 @@ document.addEventListener('DOMContentLoaded', () => {
     zoomOverlay.innerHTML = '';
   }
 
-  function openCardZoom(source) {
+    function openCardZoom(source) {
+    const card = source._card;
+    const locked = source.classList.contains('locked');
     zoomOverlay.innerHTML = '';
-    const box = document.createElement('div');
-    box.className = 'card-zoom-box';
-    const big = createCardElement(source._card, {
-      qty: source._qty,
-      locked: source.classList.contains('locked'),
-      showStats: true
-    });
-    box.appendChild(big);
-    zoomOverlay.appendChild(box);
-    zoomOverlay.classList.add('open');
 
-    // On agrandit la carte pour qu'elle remplisse l'écran sans déborder
-    const r = big.getBoundingClientRect();
-    if (r.width && r.height) {
-      const scale = Math.min(window.innerWidth * 0.85 / r.width, window.innerHeight * 0.85 / r.height, 2.4);
-      big.style.transform = 'scale(' + scale + ')';
+    let big;
+    if (card.pixel_art_url) {
+      big = document.createElement('img');
+      big.className = 'card-zoom-img';
+      big.src = card.pixel_art_url;
+      big.alt = card.player_name || '';
+    } else {
+      big = createCardElement(card, { locked });
+      big.classList.add('card-zoom-fallback');
     }
+    if (locked) big.classList.add('is-locked');
+
+    zoomOverlay.appendChild(big);
+    zoomOverlay.classList.add('open');
   }
 
   zoomOverlay.addEventListener('click', closeCardZoom);
@@ -1541,7 +1557,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (myLocked) {
       if (battlePickGrid) battlePickGrid.style.display = 'none';
       if (btnBattleLock) btnBattleLock.style.display = 'none';
-      if (battleSelectHint) battleSelectHint.textContent = '✅ Équipe validée.';
+      if (battleSelectHint) battleSelectHint.textContent = 'Équipe validée.';
     } else {
       if (battlePickGrid) battlePickGrid.style.display = '';
       if (btnBattleLock) btnBattleLock.style.display = '';
@@ -1672,7 +1688,7 @@ document.addEventListener('DOMContentLoaded', () => {
     duelStat.className = 'duel-stat is-spinning';
     for (let i = 0; i < frames; i++) {
       const st = BATTLE_STATS[(((finalIdx - (frames - 1) + i) % 4) + 4) % 4];
-      duelStat.textContent = st.icon + ' ' + st.label;
+      duelStat.innerHTML = statIcon(st.key) + '<span>' + st.label + '</span>';
       await wait(50 + i * 7);
     }
     duelStat.className = 'duel-stat is-final';
@@ -1681,7 +1697,7 @@ document.addEventListener('DOMContentLoaded', () => {
   async function playDuelRound(n, total, myDef, oppDef, statKey, outcome) {
     battleRoundInfo.textContent = 'Manche ' + n + ' / ' + total;
     duelStat.className = 'duel-stat';
-    duelStat.textContent = '🎲';
+    duelStat.innerHTML = '<span class="duel-stat-idle">Stat ?</span>';
     duelCardMe.innerHTML = '';
     duelCardOpp.innerHTML = '';
 
