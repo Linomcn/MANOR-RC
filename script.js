@@ -6,7 +6,7 @@
 const SUPABASE_URL = 'https://weolphofgqltwazxeshm.supabase.co';
 const SUPABASE_KEY = 'sb_publishable_BrJ9UhFgxWemyWrAEW4CYQ_54YeCIr4';
 
-const PACK_COOLDOWN_MS = 5 * 60 * 1000;
+const PACK_COOLDOWN_MS = 5 * 60 * 100;
 const CARDS_PER_PACK = 3;
 const PACK_ODDS = { bronze: 70, argent: 25, or: 5 };
 const RARITY_ORDER = { bronze: 1, argent: 2, or: 3 };
@@ -18,8 +18,8 @@ const BATTLE_STATS = [
   { key: 'control', label: 'Contrôle', short: 'CTR', icon: '🎯' },
   { key: 'speed',   label: 'Vitesse',  short: 'VIT', icon: '⚡' }
 ];
-const WINS_FOR_GOLD_PACK = 5;
-const BATTLE_INVITE_TIMEOUT_MS = 60 * 1000;
+const WINS_FOR_GOLD_PACK = 3;
+const BATTLE_INVITE_TIMEOUT_MS = 60 * 100;
 
 let supabaseClient = null;
 
