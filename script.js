@@ -11,6 +11,16 @@ const CARDS_PER_PACK = 3;
 const PACK_ODDS = { bronze: 70, argent: 25, or: 5 };
 const RARITY_ORDER = { bronze: 1, argent: 2, or: 3 };
 
+// --- Combat ---
+const BATTLE_STATS = [
+  { key: 'attack',  label: 'Attaque',  short: 'ATT', icon: '⚔️' },
+  { key: 'defense', label: 'Défense',  short: 'DÉF', icon: '🛡️' },
+  { key: 'control', label: 'Contrôle', short: 'CTR', icon: '🎯' },
+  { key: 'speed',   label: 'Vitesse',  short: 'VIT', icon: '⚡' }
+];
+const WINS_FOR_GOLD_PACK = 5;
+const BATTLE_INVITE_TIMEOUT_MS = 60 * 1000;
+
 let supabaseClient = null;
 
 // ---------------------------------------------------------------------
@@ -72,6 +82,8 @@ function drawPack(allCards, forceGold) {
 function createCardElement(card, options = {}) {
   const el = document.createElement('div');
   el.className = 'tcg-card ' + rarityKey(card) + (options.locked ? ' locked' : '');
+  el._card = card;
+  el._qty = options.qty;
 
   if (options.qty > 1) {
     const qty = document.createElement('div');
@@ -102,6 +114,18 @@ function createCardElement(card, options = {}) {
   const name = document.createElement('h4');
   name.textContent = card.player_name || '';
   el.appendChild(name);
+
+  if (options.showStats && card.attack != null) {
+    const stats = document.createElement('div');
+    stats.className = 'card-stats';
+    BATTLE_STATS.forEach(st => {
+      const span = document.createElement('span');
+      span.dataset.stat = st.key;
+      span.textContent = st.icon + ' ' + st.short + ' ' + card[st.key];
+      stats.appendChild(span);
+    });
+    el.appendChild(stats);
+  }
 
   if (options.status) {
     const status = document.createElement('p');
@@ -444,6 +468,15 @@ document.addEventListener('DOMContentLoaded', () => {
   let currentRaritySort = 'asc';
   let currentOwnershipFilter = 'all';
 
+  // État du combat
+  let currentBattle = null;
+  let battleChannel = null;
+  let selectedBattleCards = [];
+  let myBattleWins = 0;
+  let startRequestedFor = null;
+  let playedBattleId = null;
+  let battleOpponentName = '';
+
   function renderUserHeader(name, email) {
     if (displayUsername) displayUsername.textContent = name;
     if (displayEmail) displayEmail.textContent = email || '';
@@ -465,6 +498,9 @@ document.addEventListener('DOMContentLoaded', () => {
         loadExchangePlayers();
         initTradeRealtime();
         loadUserCollection(currentUser.id); 
+      }
+      if (tabId === 'tab-combat') {
+        onCombatTabOpen();
       }
     }
   }
@@ -489,6 +525,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     renderUserHeader(profile.username, user.email);
     isAdmin = !!profile.is_admin;
+    myBattleWins = Number(profile.battle_wins) || 0;
+    updateBattleWinsText();
     nextPackAt = profile.last_pack_opened_at ? new Date(profile.last_pack_opened_at).getTime() + PACK_COOLDOWN_MS : 0;
 
     if (roleBadge) {
@@ -911,7 +949,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if (loadedUserId !== user.id) {
       loadedUserId = user.id;
-      setTimeout(() => { loadPlayerData(user); loadPlayersList(); }, 0);
+      setTimeout(() => { loadPlayerData(user); loadPlayersList(); initBattleRealtime(); }, 0);
     }
   }
 
@@ -920,6 +958,8 @@ document.addEventListener('DOMContentLoaded', () => {
     if (packTimerInterval) clearInterval(packTimerInterval);
     cachedAllCards = []; cachedUserCards = [];
     closeOverlayNow(); closeTradeRoom();
+    if (battleChannel && supabaseClient) { supabaseClient.removeChannel(battleChannel); battleChannel = null; }
+    closeBattleRoom();
     
     if (authContainer) authContainer.style.display = 'block';
     if (gameDashboard) gameDashboard.style.display = 'none';
@@ -1206,6 +1246,552 @@ document.addEventListener('DOMContentLoaded', () => {
     if (exchangeRoom) exchangeRoom.style.display = 'none';
     if (exchangeLobby) exchangeLobby.style.display = 'block';
     loadExchangePlayers();
+  }
+
+
+  // ===================================================================
+  //  PARTIE 8 — ZOOM SUR UNE CARTE
+  // ===================================================================
+  const zoomOverlay = document.createElement('div');
+  zoomOverlay.className = 'card-zoom-overlay';
+  document.body.appendChild(zoomOverlay);
+
+  function closeCardZoom() {
+    zoomOverlay.classList.remove('open');
+    zoomOverlay.innerHTML = '';
+  }
+
+  function openCardZoom(source) {
+    zoomOverlay.innerHTML = '';
+    const box = document.createElement('div');
+    box.className = 'card-zoom-box';
+    const big = createCardElement(source._card, {
+      qty: source._qty,
+      locked: source.classList.contains('locked'),
+      showStats: true
+    });
+    box.appendChild(big);
+    zoomOverlay.appendChild(box);
+    zoomOverlay.classList.add('open');
+
+    // On agrandit la carte pour qu'elle remplisse l'écran sans déborder
+    const r = big.getBoundingClientRect();
+    if (r.width && r.height) {
+      const scale = Math.min(window.innerWidth * 0.85 / r.width, window.innerHeight * 0.85 / r.height, 2.4);
+      big.style.transform = 'scale(' + scale + ')';
+    }
+  }
+
+  zoomOverlay.addEventListener('click', closeCardZoom);
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeCardZoom(); });
+  document.addEventListener('click', (e) => {
+    const el = e.target.closest('.tcg-card');
+    if (!el || !el._card) return;
+    if (!el.closest('#collection-grid, #opponent-trade-slot, #battle-arena')) return;
+    openCardZoom(el);
+  });
+
+  // ===================================================================
+  //  PARTIE 9 — PACK DE RÉCOMPENSE (sans toucher au timer des packs gratuits)
+  // ===================================================================
+  async function claimRewardPack(forceGold) {
+    while (isOpeningPack) await wait(500);
+    if (!currentUser || !supabaseClient) return;
+
+    const user = currentUser;
+    isOpeningPack = true;
+    try {
+      const { data: allCards } = await supabaseClient.from('cards_definition').select('*');
+      if (!allCards || !allCards.length) throw new Error('Erreur chargement cartes');
+
+      const drawn = drawPack(allCards, forceGold);
+      for (const card of drawn) {
+        const { data: existing } = await supabaseClient.from('user_cards').select('id, quantity').eq('user_id', user.id).eq('card_id', card.id).maybeSingle();
+        if (existing) {
+          await supabaseClient.from('user_cards').update({ quantity: existing.quantity + 1 }).eq('id', existing.id);
+        } else {
+          await supabaseClient.from('user_cards').insert([{ user_id: user.id, card_id: card.id, quantity: 1 }]);
+        }
+      }
+
+      await playPackAnimation(drawn);
+      showToast('Pack de récompense ajouté à ta collection !', 'success');
+    } catch (err) {
+      showToast('Erreur pendant la récupération du pack.', 'error');
+    } finally {
+      isOpeningPack = false;
+      if (currentUser) refreshPackUI();
+    }
+  }
+
+  // ===================================================================
+  //  PARTIE 10 — COMBATS JOUEUR CONTRE JOUEUR
+  //  3 cartes chacun, 3 manches. À chaque manche : une carte de chaque
+  //  camp, une stat tirée au sort, la plus haute gagne la manche.
+  //  Le tirage est fait côté Supabase (fonction start_battle).
+  // ===================================================================
+  let battlePickerFor = null;
+
+  const battleLobby = document.getElementById('battle-lobby');
+  const battleRoom = document.getElementById('battle-room');
+  const battlePlayersGrid = document.getElementById('battle-players-grid');
+  const battleWinsText = document.getElementById('battle-wins-text');
+
+  const battleInviteModal = document.getElementById('battleInviteModal');
+  const battleInviteSender = document.getElementById('battle-invite-sender');
+  const btnAcceptBattle = document.getElementById('btn-accept-battle');
+  const btnDeclineBattle = document.getElementById('btn-decline-battle');
+
+  const battleOpponentNameEl = document.getElementById('battle-opponent-name');
+  const battleStatusBadge = document.getElementById('battle-status-indicator');
+  const battleSelectPhase = document.getElementById('battle-select-phase');
+  const battleSelectHint = document.getElementById('battle-select-hint');
+  const battlePickGrid = document.getElementById('battle-pick-grid');
+  const btnBattleLock = document.getElementById('btn-battle-lock');
+  const btnBattleCancel = document.getElementById('btn-battle-cancel');
+  const battleOppStatus = document.getElementById('battle-opp-status');
+
+  const battleArena = document.getElementById('battle-arena');
+  const scoreMeEl = document.getElementById('score-me');
+  const scoreOppEl = document.getElementById('score-opp');
+  const duelNameMe = document.getElementById('duel-name-me');
+  const duelNameOpp = document.getElementById('duel-name-opp');
+  const duelCardMe = document.getElementById('duel-card-me');
+  const duelCardOpp = document.getElementById('duel-card-opp');
+  const duelStat = document.getElementById('duel-stat');
+  const battleRoundInfo = document.getElementById('battle-round-info');
+  const battleResult = document.getElementById('battle-result');
+  const btnBattleLeave = document.getElementById('btn-battle-leave');
+
+  function updateBattleWinsText() {
+    if (!battleWinsText) return;
+    const left = WINS_FOR_GOLD_PACK - (myBattleWins % WINS_FOR_GOLD_PACK);
+    battleWinsText.textContent = 'Victoires : ' + myBattleWins + ' — pack Or dans ' + left + ' victoire' + (left > 1 ? 's' : '');
+  }
+
+  function onCombatTabOpen() {
+    if (!currentUser) return;
+    loadUserCollection(currentUser.id);
+    updateBattleWinsText();
+    if (!currentBattle) loadBattlePlayers();
+  }
+
+  function findCardDef(id) {
+    return cachedAllCards.find(c => String(c.id) === String(id));
+  }
+
+  // ---------- Lobby : liste des joueurs à défier ----------
+  async function loadBattlePlayers() {
+    if (!battlePlayersGrid || !supabaseClient || !currentUser) return;
+
+    const { data: profiles } = await supabaseClient.from('profiles').select('id, username').neq('id', currentUser.id);
+    if (!currentUser) return;
+
+    battlePlayersGrid.innerHTML = '';
+    if (!profiles || profiles.length === 0) {
+      battlePlayersGrid.innerHTML = '<p class="grid-message">Aucun autre joueur à défier pour le moment.</p>';
+      return;
+    }
+
+    profiles.forEach(p => {
+      const card = document.createElement('div');
+      card.className = 'exchange-player-card';
+
+      const avatar = document.createElement('div');
+      avatar.className = 'player-mini-avatar';
+      avatar.textContent = (p.username || '?').charAt(0).toUpperCase();
+
+      const info = document.createElement('div');
+      info.className = 'exchange-player-info';
+      const name = document.createElement('h4');
+      name.textContent = p.username || 'Joueur';
+      info.appendChild(name);
+
+      const btn = document.createElement('button');
+      btn.className = 'btn-invite';
+      btn.textContent = 'Défier';
+      btn.addEventListener('click', () => sendBattleInvite(p.id, p.username));
+
+      card.append(avatar, info, btn);
+      battlePlayersGrid.appendChild(card);
+    });
+  }
+
+  async function sendBattleInvite(receiverId, receiverName) {
+    if (!currentUser || !supabaseClient) return;
+    if (currentBattle) {
+      showToast('Un combat est déjà en cours ou en attente.', 'info');
+      return;
+    }
+
+    const { data, error } = await supabaseClient.from('battles')
+      .insert([{ sender_id: currentUser.id, receiver_id: receiverId, status: 'pending' }])
+      .select().single();
+
+    if (error || !data) {
+      showToast("Impossible d'envoyer le défi.", 'error');
+      return;
+    }
+
+    currentBattle = data;
+    battleOpponentName = receiverName || 'Adversaire';
+    showToast('Défi envoyé à ' + battleOpponentName + ' !', 'info');
+
+    // Sans réponse après 1 minute, le défi expire
+    setTimeout(async () => {
+      if (currentBattle && currentBattle.id === data.id && currentBattle.status === 'pending') {
+        currentBattle = null;
+        await supabaseClient.from('battles').update({ status: 'canceled' }).eq('id', data.id);
+        showToast('Défi expiré : pas de réponse de ' + battleOpponentName + '.', 'info');
+      }
+    }, BATTLE_INVITE_TIMEOUT_MS);
+  }
+
+  // ---------- Temps réel ----------
+  function initBattleRealtime() {
+    if (!supabaseClient || !currentUser) return;
+    if (battleChannel) supabaseClient.removeChannel(battleChannel);
+
+    battleChannel = supabaseClient
+      .channel('public:battles')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'battles' }, payload => {
+        const battle = payload.new;
+        if (currentUser && battle && battle.id &&
+            (battle.sender_id === currentUser.id || battle.receiver_id === currentUser.id)) {
+          handleBattleUpdate(battle);
+        }
+      }).subscribe();
+  }
+
+  async function handleBattleUpdate(battle) {
+    if (!currentUser) return;
+
+    // Nouveau défi reçu
+    if (battle.status === 'pending') {
+      if (battle.receiver_id === currentUser.id && !currentBattle) {
+        currentBattle = battle;
+        const { data: senderProfile } = await supabaseClient.from('profiles').select('username').eq('id', battle.sender_id).single();
+        battleOpponentName = senderProfile ? senderProfile.username : 'Un joueur';
+        if (battleInviteSender) battleInviteSender.textContent = battleOpponentName;
+        if (battleInviteModal) battleInviteModal.style.display = 'flex';
+      }
+      return;
+    }
+
+    // Tout le reste ne concerne que le combat en cours
+    if (!currentBattle || currentBattle.id !== battle.id) return;
+    currentBattle = battle;
+
+    if (battle.status === 'declined' || battle.status === 'canceled') {
+      closeBattleRoom();
+      showToast('Le combat a été refusé ou annulé.', 'info');
+      return;
+    }
+
+    if (battle.status === 'active') {
+      if (battleInviteModal) battleInviteModal.style.display = 'none';
+      goToCombatTab();
+      await renderBattleSelect(battle);
+      return;
+    }
+
+    if (battle.status === 'finished') {
+      goToCombatTab();
+      await playBattle(battle);
+    }
+  }
+
+  function goToCombatTab() {
+    const tab = document.getElementById('tab-combat');
+    if (tab && tab.style.display === 'none') showTab('tab-combat');
+  }
+
+  if (btnAcceptBattle) {
+    btnAcceptBattle.addEventListener('click', async () => {
+      if (currentBattle) await supabaseClient.from('battles').update({ status: 'active' }).eq('id', currentBattle.id);
+    });
+  }
+
+  if (btnDeclineBattle) {
+    btnDeclineBattle.addEventListener('click', async () => {
+      if (currentBattle) await supabaseClient.from('battles').update({ status: 'declined' }).eq('id', currentBattle.id);
+      closeBattleRoom();
+    });
+  }
+
+  // ---------- Phase 1 : choix des 3 cartes ----------
+  async function renderBattleSelect(battle) {
+    if (battleLobby) battleLobby.style.display = 'none';
+    if (battleRoom) battleRoom.style.display = 'block';
+    if (battleSelectPhase) battleSelectPhase.style.display = 'block';
+    if (battleArena) battleArena.style.display = 'none';
+    if (battleOpponentNameEl) battleOpponentNameEl.textContent = battleOpponentName || 'Adversaire';
+    if (battleStatusBadge) battleStatusBadge.textContent = 'Choix des cartes';
+
+    const isSender = battle.sender_id === currentUser.id;
+    const myLocked = isSender ? battle.sender_locked : battle.receiver_locked;
+    const oppLocked = isSender ? battle.receiver_locked : battle.sender_locked;
+
+    if (battlePickerFor !== battle.id) {
+      battlePickerFor = battle.id;
+      selectedBattleCards = [];
+      await loadUserCollection(currentUser.id);
+    }
+
+    if (myLocked) {
+      if (battlePickGrid) battlePickGrid.style.display = 'none';
+      if (btnBattleLock) btnBattleLock.style.display = 'none';
+      if (battleSelectHint) battleSelectHint.textContent = '✅ Équipe validée.';
+    } else {
+      if (battlePickGrid) battlePickGrid.style.display = '';
+      if (btnBattleLock) btnBattleLock.style.display = '';
+      renderBattlePicker();
+    }
+
+    if (battleOppStatus) {
+      battleOppStatus.textContent = oppLocked
+        ? '🔒 ' + (battleOpponentName || 'Adversaire') + ' est prêt !'
+        : (battleOpponentName || 'Adversaire') + ' choisit son équipe...';
+    }
+
+    if (myLocked && oppLocked && startRequestedFor !== battle.id) {
+      startRequestedFor = battle.id;
+      requestBattleStart(battle.id);
+    }
+  }
+
+  function updateBattlePickerUI() {
+    if (battleSelectHint) battleSelectHint.textContent = 'Choisis 3 cartes : ' + selectedBattleCards.length + '/3';
+    if (btnBattleLock) btnBattleLock.disabled = selectedBattleCards.length !== 3;
+  }
+
+  function renderBattlePicker() {
+    if (!battlePickGrid) return;
+    battlePickGrid.innerHTML = '';
+
+    const cards = cachedUserCards
+      .filter(uc => uc.quantity > 0)
+      .map(uc => findCardDef(uc.card_id))
+      .filter(c => c && c.attack != null);
+
+    if (cards.length < 3) {
+      battlePickGrid.innerHTML = '<p class="grid-message">Il te faut au moins 3 cartes différentes (avec stats) pour combattre.</p>';
+      if (btnBattleLock) btnBattleLock.disabled = true;
+      return;
+    }
+
+    selectedBattleCards = selectedBattleCards.filter(id => cards.some(c => String(c.id) === String(id)));
+
+    cards.forEach(card => {
+      const el = createCardElement(card, { showStats: true });
+      if (selectedBattleCards.some(id => String(id) === String(card.id))) el.classList.add('selected');
+
+      el.addEventListener('click', () => {
+        const i = selectedBattleCards.findIndex(id => String(id) === String(card.id));
+        if (i >= 0) {
+          selectedBattleCards.splice(i, 1);
+        } else if (selectedBattleCards.length < 3) {
+          selectedBattleCards.push(card.id);
+        } else {
+          showToast('3 cartes maximum.', 'info');
+          return;
+        }
+        el.classList.toggle('selected');
+        updateBattlePickerUI();
+      });
+      battlePickGrid.appendChild(el);
+    });
+    updateBattlePickerUI();
+  }
+
+  if (btnBattleLock) {
+    btnBattleLock.addEventListener('click', async () => {
+      if (!currentBattle || selectedBattleCards.length !== 3) return;
+      btnBattleLock.disabled = true;
+      const isSender = currentBattle.sender_id === currentUser.id;
+      const updateData = isSender
+        ? { sender_cards: selectedBattleCards, sender_locked: true }
+        : { receiver_cards: selectedBattleCards, receiver_locked: true };
+      const { error } = await supabaseClient.from('battles').update(updateData).eq('id', currentBattle.id);
+      if (error) {
+        showToast("Impossible de valider l'équipe.", 'error');
+        btnBattleLock.disabled = false;
+      }
+    });
+  }
+
+  if (btnBattleCancel) {
+    btnBattleCancel.addEventListener('click', async () => {
+      if (!currentBattle) return;
+      await supabaseClient.from('battles').update({ status: 'canceled' }).eq('id', currentBattle.id);
+      closeBattleRoom();
+    });
+  }
+
+  async function requestBattleStart(battleId) {
+    const { error } = await supabaseClient.rpc('start_battle', { battle_uuid: battleId });
+    if (error) {
+      console.error('start_battle :', error);
+      showToast('Erreur au lancement du combat.', 'error');
+      startRequestedFor = null;
+      return;
+    }
+    // Filet de sécurité si l'événement temps réel est raté
+    const { data } = await supabaseClient.from('battles').select('*').eq('id', battleId).single();
+    if (data && data.status === 'finished') handleBattleUpdate(data);
+  }
+
+  // ---------- Phase 2 : les 3 manches ----------
+  function buildDuelCard(card) {
+    const wrap = document.createElement('div');
+    wrap.className = 'duel-card';
+
+    const inner = document.createElement('div');
+    inner.className = 'duel-card-inner';
+
+    const back = document.createElement('div');
+    back.className = 'duel-face duel-back';
+    const mark = document.createElement('span');
+    mark.textContent = 'MRC';
+    back.appendChild(mark);
+
+    const front = document.createElement('div');
+    front.className = 'duel-face duel-front';
+    front.appendChild(createCardElement(card, { showStats: true }));
+
+    inner.append(back, front);
+    wrap.appendChild(inner);
+    return wrap;
+  }
+
+  // Le "dé" : les 4 stats défilent puis s'arrêtent sur la stat tirée au sort
+  async function spinStat(finalKey) {
+    const found = BATTLE_STATS.findIndex(s => s.key === finalKey);
+    const finalIdx = found >= 0 ? found : 0;
+    const frames = 24;
+    duelStat.className = 'duel-stat is-spinning';
+    for (let i = 0; i < frames; i++) {
+      const st = BATTLE_STATS[(((finalIdx - (frames - 1) + i) % 4) + 4) % 4];
+      duelStat.textContent = st.icon + ' ' + st.label;
+      await wait(50 + i * 7);
+    }
+    duelStat.className = 'duel-stat is-final';
+  }
+
+  async function playDuelRound(n, total, myDef, oppDef, statKey, outcome) {
+    battleRoundInfo.textContent = 'Manche ' + n + ' / ' + total;
+    duelStat.className = 'duel-stat';
+    duelStat.textContent = '🎲';
+    duelCardMe.innerHTML = '';
+    duelCardOpp.innerHTML = '';
+
+    const meEl = buildDuelCard(myDef);
+    const oppEl = buildDuelCard(oppDef);
+    duelCardMe.appendChild(meEl);
+    duelCardOpp.appendChild(oppEl);
+
+    await wait(700);
+    await spinStat(statKey);
+    await wait(400);
+
+    meEl.classList.add('is-flipped');
+    oppEl.classList.add('is-flipped');
+    await wait(900);
+
+    [meEl, oppEl].forEach(el => {
+      const target = el.querySelector('[data-stat="' + statKey + '"]');
+      if (target) target.classList.add('stat-hit');
+    });
+    meEl.classList.add(outcome === 'me' ? 'duel-win' : (outcome === 'opp' ? 'duel-lose' : 'duel-draw'));
+    oppEl.classList.add(outcome === 'opp' ? 'duel-win' : (outcome === 'me' ? 'duel-lose' : 'duel-draw'));
+  }
+
+  async function playBattle(battle) {
+    if (playedBattleId === battle.id) return;
+    playedBattleId = battle.id;
+
+    if (!cachedAllCards.length) await loadUserCollection(currentUser.id);
+
+    if (battleLobby) battleLobby.style.display = 'none';
+    if (battleRoom) battleRoom.style.display = 'block';
+    if (battleSelectPhase) battleSelectPhase.style.display = 'none';
+    if (battleArena) battleArena.style.display = 'block';
+    if (battleOpponentNameEl) battleOpponentNameEl.textContent = battleOpponentName || 'Adversaire';
+    if (battleStatusBadge) battleStatusBadge.textContent = 'Combat en cours';
+    if (duelNameMe) duelNameMe.textContent = 'Toi';
+    if (duelNameOpp) duelNameOpp.textContent = battleOpponentName || 'Adversaire';
+    scoreMeEl.textContent = '0';
+    scoreOppEl.textContent = '0';
+    battleResult.textContent = '';
+    battleResult.className = 'battle-result';
+    btnBattleLeave.style.display = 'none';
+    duelCardMe.innerHTML = '';
+    duelCardOpp.innerHTML = '';
+
+    const isSender = battle.sender_id === currentUser.id;
+    const rounds = Array.isArray(battle.rounds) ? battle.rounds : [];
+    let myScore = 0;
+    let oppScore = 0;
+
+    await wait(600);
+    for (let i = 0; i < rounds.length; i++) {
+      const r = rounds[i];
+      const myDef = findCardDef(isSender ? r.sender_card : r.receiver_card);
+      const oppDef = findCardDef(isSender ? r.receiver_card : r.sender_card);
+      if (!myDef || !oppDef) continue;
+
+      const outcome = r.winner === 'draw' ? 'draw' : (((r.winner === 'sender') === isSender) ? 'me' : 'opp');
+      await playDuelRound(i + 1, rounds.length, myDef, oppDef, r.stat, outcome);
+
+      if (outcome === 'me') myScore++;
+      else if (outcome === 'opp') oppScore++;
+      scoreMeEl.textContent = String(myScore);
+      scoreOppEl.textContent = String(oppScore);
+      await wait(1400);
+    }
+
+    if (!currentUser) return;
+    await finishBattle(battle, myScore, oppScore);
+  }
+
+  async function finishBattle(battle, myScore, oppScore) {
+    const iWon = battle.winner_id === currentUser.id;
+    const isDraw = !battle.winner_id;
+    const score = ' (' + myScore + ' - ' + oppScore + ')';
+
+    battleRoundInfo.textContent = 'Combat terminé';
+    if (battleStatusBadge) battleStatusBadge.textContent = 'Terminé';
+    battleResult.className = 'battle-result ' + (iWon ? 'is-win' : (isDraw ? 'is-draw' : 'is-lose'));
+    battleResult.textContent = iWon ? '🏆 Victoire' + score : (isDraw ? '🤝 Égalité' + score : '💀 Défaite' + score);
+    btnBattleLeave.style.display = 'inline-block';
+
+    if (!iWon) return;
+
+    const { data: wins, error } = await supabaseClient.rpc('claim_battle_win', { battle_uuid: battle.id });
+    if (error || typeof wins !== 'number') {
+      showToast('Récompense indisponible.', 'error');
+      return;
+    }
+
+    myBattleWins = wins;
+    updateBattleWinsText();
+    const gold = wins % WINS_FOR_GOLD_PACK === 0;
+    battleResult.textContent += gold ? ' — Pack Or débloqué !' : ' — Pack gagné !';
+    await claimRewardPack(gold);
+  }
+
+  if (btnBattleLeave) btnBattleLeave.addEventListener('click', closeBattleRoom);
+
+  function closeBattleRoom() {
+    currentBattle = null;
+    selectedBattleCards = [];
+    startRequestedFor = null;
+    battlePickerFor = null;
+    if (battleRoom) battleRoom.style.display = 'none';
+    if (battleArena) battleArena.style.display = 'none';
+    if (battleLobby) battleLobby.style.display = 'block';
+    if (battleInviteModal) battleInviteModal.style.display = 'none';
+    loadBattlePlayers();
   }
 
 });
